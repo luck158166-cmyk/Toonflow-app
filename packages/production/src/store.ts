@@ -150,8 +150,8 @@ export class ProductionStore {
     }
   }
 
-  constructor(readonly db: Database, globalDatabase: Database = db) {
-    this.globalBudgets = new GlobalBudgetCoordinator(globalDatabase);
+  constructor(readonly db: Database) {
+    this.globalBudgets = new GlobalBudgetCoordinator(db);
     db.exec("PRAGMA foreign_keys = ON;");
     db.query("PRAGMA journal_mode = WAL").get();
     db.exec(`
@@ -666,59 +666,45 @@ export class ProductionStore {
 
   /** Persist dispatch intent before network I/O. A crash after this point must reconcile, never blindly resubmit. */
   beginSubmission(id: string): DispatchResult {
-    const task = this.getTask(id);
-    if (task.state === "succeeded") return { status: "already_succeeded", task };
-    if (task.state !== "queued" || task.requestStarted) return { status: "already_dispatched", task };
+    return this.atomic(() => {
+      const task = this.getTask(id);
+      if (task.state === "succeeded") return { status: "already_succeeded" as const, task };
+      if (task.state !== "queued" || task.requestStarted) return { status: "already_dispatched" as const, task };
 
-    let globalReservation: ReturnType<GlobalBudgetCoordinator["reserve"]> | undefined;
-    if (task.billable) {
-      globalReservation = this.globalBudgets.reserve(task);
-      if (!globalReservation.allowed) {
-        return { status: "budget_exhausted", task, usedMicros: globalReservation.exceeded.usedMicros,
-          limitMicros: globalReservation.exceeded.limitMicros };
-      }
-    }
-
-    try {
-      const result = this.atomic(() => {
-        const current = this.getTask(id);
-        if (current.state === "succeeded") return { status: "already_succeeded" as const, task: current };
-        if (current.state !== "queued" || current.requestStarted) return { status: "already_dispatched" as const, task: current };
-
-        let episodeWarning = false;
-        if (task.billable) {
-          const episodeUsage = this.usageFor({ type: "episode", key: episodeBudgetKey(task.projectId, task.episodeId) }, task.currency);
-          if (episodeUsage.configured && (episodeUsage.usedMicros >= episodeUsage.limitMicros
-            || task.estimatedCostMicros > episodeUsage.limitMicros - episodeUsage.usedMicros)) {
-            return { status: "budget_exhausted" as const, task: current,
-              usedMicros: episodeUsage.usedMicros, limitMicros: episodeUsage.limitMicros };
-          }
-          episodeWarning = episodeUsage.configured &&
-            BigInt(episodeUsage.usedMicros + task.estimatedCostMicros) * 10000n >=
-            BigInt(episodeUsage.limitMicros) * BigInt(episodeUsage.warningBasisPoints);
-          this.db.query(`INSERT INTO task_reservation(task_id, amount_micros, currency, state, updated_at)
-            VALUES (?, ?, ?, 'active', ?)`).run(id, task.estimatedCostMicros, task.currency, Date.now());
+      let episodeWarning = false;
+      if (task.billable) {
+        const episodeUsage = this.usageFor({ type: "episode", key: episodeBudgetKey(task.projectId, task.episodeId) }, task.currency);
+        if (episodeUsage.configured && (episodeUsage.usedMicros >= episodeUsage.limitMicros
+          || task.estimatedCostMicros > episodeUsage.limitMicros - episodeUsage.usedMicros)) {
+          return { status: "budget_exhausted" as const, task,
+            usedMicros: episodeUsage.usedMicros, limitMicros: episodeUsage.limitMicros };
         }
-        this.db.query(`UPDATE generation_task SET state = 'dispatching', request_started = 1,
-          attempt = attempt + 1, updated_at = ? WHERE id = ? AND state = 'queued' AND request_started = 0`)
-          .run(Date.now(), id);
-        const updated = this.getTask(id);
-        const reservedMicros = task.billable ? task.estimatedCostMicros : 0;
-        const usedAfterReserveMicros = task.billable
-          ? (globalReservation!.usedAfterReserveMicros ?? 0) : this.getBudgetUsage().usedMicros;
-        const warning = Boolean(globalReservation?.warning || episodeWarning);
-        return warning
-          ? { status: "warning_90" as const, task: updated, reservedMicros, usedAfterReserveMicros }
-          : { status: "started" as const, task: updated, reservedMicros, usedAfterReserveMicros };
-      });
-      if (result.status === "budget_exhausted" && globalReservation?.allowed && globalReservation.created) {
-        this.globalBudgets.release(id, true);
+        episodeWarning = episodeUsage.configured &&
+          BigInt(episodeUsage.usedMicros + task.estimatedCostMicros) * 10000n >=
+          BigInt(episodeUsage.limitMicros) * BigInt(episodeUsage.warningBasisPoints);
       }
-      return result;
-    } catch (error) {
-      if (globalReservation?.allowed && globalReservation.created) this.globalBudgets.release(id, true);
-      throw error;
-    }
+
+      const reservation = task.billable ? this.globalBudgets.reserve(task) : null;
+      if (reservation && !reservation.allowed) {
+        return { status: "budget_exhausted" as const, task,
+          usedMicros: reservation.exceeded.usedMicros, limitMicros: reservation.exceeded.limitMicros };
+      }
+      const now = Date.now();
+      if (task.billable) {
+        this.db.query(`INSERT INTO task_reservation(task_id, amount_micros, currency, state, updated_at)
+          VALUES (?, ?, ?, 'active', ?)`).run(id, task.estimatedCostMicros, task.currency, now);
+      }
+      this.db.query(`UPDATE generation_task SET state = 'dispatching', request_started = 1,
+        attempt = attempt + 1, updated_at = ? WHERE id = ? AND state = 'queued' AND request_started = 0`)
+        .run(now, id);
+      const updated = this.getTask(id);
+      const reservedMicros = task.billable ? task.estimatedCostMicros : 0;
+      const usedAfterReserveMicros = reservation?.allowed
+        ? reservation.usedAfterReserveMicros : this.getBudgetUsage().usedMicros;
+      return reservation?.warning || episodeWarning
+        ? { status: "warning_90" as const, task: updated, reservedMicros, usedAfterReserveMicros }
+        : { status: "started" as const, task: updated, reservedMicros, usedAfterReserveMicros };
+    });
   }
 
   registerProviderTask(id: string, providerTaskId: string) {
@@ -771,12 +757,10 @@ export class ProductionStore {
     currency = currency.toUpperCase();
     assertMoney(amountMicros, currency);
     if (!sourceRef.trim()) throw new TypeError("Charge source reference is required.");
-    const task = this.getTask(id);
-    if (currency !== task.currency) throw new Error(`Charge currency mismatch: ${currency} != ${task.currency}`);
-    this.globalBudgets.recordCharge(task, sourceRef, amountMicros, currency, details);
     return this.atomic(() => {
       const task = this.row(id);
       if (currency !== task.currency) throw new Error(`Charge currency mismatch: ${currency} != ${task.currency}`);
+      this.globalBudgets.recordCharge(toTask(task), sourceRef, amountMicros, currency, details);
       const existing = this.db.query("SELECT amount_micros, currency FROM cost_ledger WHERE source_ref = ?")
         .get(sourceRef) as { amount_micros: number; currency: string } | null;
       if (existing) {
@@ -793,14 +777,11 @@ export class ProductionStore {
     currency = currency.toUpperCase();
     assertMoney(actualCostMicros, currency);
     if (!sourceRef.trim()) throw new TypeError("Settlement reference is required.");
-    const currentTask = this.row(id);
-    if (!currentTask.billable) throw new Error("A non-billable task cannot settle provider cost.");
-    if (currency !== currentTask.currency) throw new Error(`Settlement currency mismatch: ${currency} != ${currentTask.currency}`);
-    this.globalBudgets.settle(toTask(currentTask), sourceRef, actualCostMicros, currency, details);
     return this.atomic(() => {
       const task = this.row(id);
       if (!task.billable) throw new Error("A non-billable task cannot settle provider cost.");
       if (currency !== task.currency) throw new Error(`Settlement currency mismatch: ${currency} != ${task.currency}`);
+      this.globalBudgets.settle(toTask(task), sourceRef, actualCostMicros, currency, details);
       const existing = this.db.query("SELECT task_id, amount_micros, currency FROM cost_ledger WHERE source_ref = ?")
         .get(sourceRef) as { task_id: string; amount_micros: number; currency: string } | null;
       let inserted = false;
@@ -820,17 +801,12 @@ export class ProductionStore {
 
   releaseReservation(id: string, confirmedNoCharge: true) {
     if (confirmedNoCharge !== true) throw new Error("Reservation release requires explicit no-charge confirmation.");
-    const taskSnapshot = this.row(id);
-    if (taskSnapshot.billable) {
-      const existingCharge = this.db.query("SELECT 1 AS found FROM cost_ledger WHERE task_id = ? LIMIT 1").get(id);
-      if (existingCharge) throw new Error("Cannot release a reservation after any provider cost was recorded.");
-      this.globalBudgets.release(id, true);
-    }
     this.atomic(() => {
       const task = this.row(id);
       if (task.billable) {
         const charge = this.db.query("SELECT 1 AS found FROM cost_ledger WHERE task_id = ? LIMIT 1").get(id);
         if (charge) throw new Error("Cannot release a reservation after any provider cost was recorded.");
+        this.globalBudgets.release(id, true);
       }
       this.db.query(`UPDATE task_reservation SET state = 'released', updated_at = ?
         WHERE task_id = ? AND state = 'active'`).run(Date.now(), id);
@@ -872,6 +848,11 @@ export class ProductionStore {
     this.atomic(() => {
       const task = this.row(id);
       if (task.state === "succeeded") throw new Error("A successful task cannot be marked failed.");
+      if (confirmedNoCharge && task.billable) {
+        const charge = this.db.query("SELECT 1 AS found FROM cost_ledger WHERE task_id = ? LIMIT 1").get(id);
+        if (charge) throw new Error("Cannot release a reservation after any provider cost was recorded.");
+        this.globalBudgets.release(id, true);
+      }
       this.db.query(`UPDATE generation_task SET state = 'failed', updated_at = ? WHERE id = ?`).run(Date.now(), id);
       if (confirmedNoCharge) this.db.query(`UPDATE task_reservation SET state = 'released', updated_at = ? WHERE task_id = ? AND state = 'active'`)
         .run(Date.now(), id);

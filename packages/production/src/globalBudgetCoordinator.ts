@@ -6,7 +6,7 @@ type Usage = {
   warningBasisPoints: number; chargedMicros: number; reservedMicros: number; usedMicros: number;
 };
 
-/** Cross-project budget authority; pass the global database separately from each project's database. */
+/** Cross-project budget authority sharing the task database transaction. */
 export class GlobalBudgetCoordinator {
   constructor(readonly db: Database) {
     db.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;");
@@ -60,9 +60,11 @@ export class GlobalBudgetCoordinator {
   }
 
   private atomic<T>(operation: () => T): T {
-    this.db.exec("BEGIN IMMEDIATE");
-    try { const result = operation(); this.db.exec("COMMIT"); return result; }
-    catch (error) { this.db.exec("ROLLBACK"); throw error; }
+    // A savepoint joins ProductionStore's BEGIN IMMEDIATE when called from a
+    // task mutation, while remaining transactional for standalone budget edits.
+    this.db.exec("SAVEPOINT globalBudget");
+    try { const result = operation(); this.db.exec("RELEASE globalBudget"); return result; }
+    catch (error) { this.db.exec("ROLLBACK TO globalBudget; RELEASE globalBudget"); throw error; }
   }
 
   setBudget(scope: BudgetScope, limitMicros: number, currency: string, warningBasisPoints = 9000) {

@@ -35,7 +35,6 @@ export async function reconcileProviderTask(store: ProductionStore, taskId: stri
       store.settleReservation(taskId, result.sourceRef, result.amountMicros, result.currency, result.chargeDetails);
     }
     const failed = store.failTask(taskId, result.chargeStatus === "no_charge");
-    if (result.chargeStatus === "no_charge" && task.billable) store.releaseReservation(taskId, true);
     return { status: "failed" as const, task: failed, chargeStatus: result.chargeStatus };
   }
 

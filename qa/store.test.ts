@@ -137,12 +137,10 @@ describe("production task safety", () => {
     db.close();
   });
 
-  it("enforces one global budget across separate project databases", () => {
+  it("enforces one global budget across separate projects in the authoritative task database", () => {
     const globalDb = new Database(":memory:");
-    const firstProjectDb = new Database(":memory:");
-    const secondProjectDb = new Database(":memory:");
-    const firstProject = new ProductionStore(firstProjectDb, globalDb);
-    const secondProject = new ProductionStore(secondProjectDb, globalDb);
+    const firstProject = new ProductionStore(globalDb);
+    const secondProject = new ProductionStore(globalDb);
     firstProject.setBudget(100_000, "CNY");
     const first = firstProject.createTask(paidInput("project-a-global-cap", 80_000)).task;
     expect(firstProject.beginSubmission(first.id).status).toBe("started");
@@ -153,9 +151,35 @@ describe("production task safety", () => {
     expect(secondProject.beginSubmission(second.id).status).toBe("budget_exhausted");
     expect(secondProject.getBudgetUsage("CNY").usedMicros).toBe(80_000);
     expect(secondProject.getTask(second.id).requestStarted).toBe(false);
-    firstProjectDb.close();
-    secondProjectDb.close();
     globalDb.close();
+  });
+
+  it("rolls back a global reservation when writing dispatch intent fails", () => {
+    const { db, store } = fixture();
+    try {
+      const task = store.createTask(paidInput("atomic-dispatch", 50_000)).task;
+      db.exec(`CREATE TRIGGER reject_local_reservation BEFORE INSERT ON task_reservation
+        BEGIN SELECT RAISE(ABORT, 'injected local write failure'); END`);
+      expect(() => store.beginSubmission(task.id)).toThrow("injected local write failure");
+      expect(store.getTask(task.id)).toMatchObject({ state: "queued", attempt: 0, requestStarted: false });
+      expect(db.query("SELECT COUNT(*) AS count FROM global_task_reservation").get()).toEqual({ count: 0 });
+      expect(store.getBudgetUsage("CNY").reservedMicros).toBe(0);
+    } finally { db.close(); }
+  });
+
+  it("rolls back global settlement when the project cost entry fails", () => {
+    const { db, store } = fixture();
+    try {
+      const task = store.createTask(paidInput("atomic-settlement", 50_000)).task;
+      store.beginSubmission(task.id);
+      db.exec(`CREATE TRIGGER reject_cost_entry BEFORE INSERT ON cost_ledger
+        BEGIN SELECT RAISE(ABORT, 'injected cost write failure'); END`);
+      expect(() => store.settleReservation(task.id, "atomic-invoice", 40_000, "CNY"))
+        .toThrow("injected cost write failure");
+      expect(store.getBudgetUsage("CNY")).toMatchObject({ chargedMicros: 0, reservedMicros: 50_000 });
+      expect(db.query("SELECT state FROM global_task_reservation WHERE task_id = ?").get(task.id))
+        .toEqual({ state: "active" });
+    } finally { db.close(); }
   });
 
   it("enforces configured project, episode, daily, and model limits independently", () => {

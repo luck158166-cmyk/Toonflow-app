@@ -34,8 +34,15 @@ export async function withProduction<T>(workspaceDirectory: string,
   const projectDb = new Database(projectPath, { create: true });
   let globalDb: Database | undefined;
   try {
+    const legacyTasks = projectDb.query(`SELECT 1 AS found FROM sqlite_master
+      WHERE type = 'table' AND name = 'generation_task'`).get();
+    if (legacyTasks && (projectDb.query("SELECT COUNT(*) AS count FROM generation_task").get() as { count: number }).count > 0) {
+      throw Object.assign(new Error("发现旧版项目生产任务；完成显式迁移前不会忽略或覆盖这些任务。"), { status: 409 });
+    }
     globalDb = new Database(globalPath, { create: true });
-    const store = new ProductionStore(projectDb, globalDb);
+    // ACT: all billable tasks and budget rows share one WAL database, so a
+    // reservation, dispatch intent, and charge can commit as one transaction.
+    const store = new ProductionStore(globalDb);
     const catalog = new ProductionCatalog(projectDb);
     return await action(catalog, store);
   } finally {
