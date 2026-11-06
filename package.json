@@ -52,6 +52,7 @@
     "build:tools": "bun -e \"import { rmSync } from '@toonflow/file'; import { resolve } from 'node:path'; rmSync(resolve('build/tools'), { recursive: true, force: true });\" && NODE_ENV=production bun run --filter './packages/tools/*' build"
   },
   "devDependencies": {
+    "@toonflow/ffmpeg": "workspace:*",
     "@toonflow/file": "workspace:*",
     "@types/bun": "^1.4.2",
     "@types/postcss-pxtorem": "^6.1.0",

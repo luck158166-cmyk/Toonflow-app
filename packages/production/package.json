@@ -1,0 +1,11 @@
+{
+  "name": "@toonflow/production",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc" },
+  "dependencies": {
+    "@toonflow/file": "workspace:*",
+    "@toonflow/ffmpeg": "workspace:*"
+  }
+}

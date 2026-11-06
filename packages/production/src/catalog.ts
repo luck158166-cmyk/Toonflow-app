@@ -1,0 +1,439 @@
+import { randomUUID } from "node:crypto";
+import { Database } from "bun:sqlite";
+
+export type SourceKind = "synopsis" | "novel" | "script";
+export type ReviewState = "draft" | "confirmed" | "changes_requested";
+export type RuntimeState = "idle" | "queued" | "running" | "paused" | "failed" | "succeeded";
+export type VideoReadiness = "blocked" | "ready";
+export type DialogueKind = "dialogue" | "narration" | "voiceover" | "phone";
+export type CandidateState = "pending" | "linked" | "ignored";
+export type AssetKind = "character" | "prop" | "costume";
+
+export type EpisodeDraft = {
+  episodeNumber: number; title: string; logline: string; outline: string[]; script: unknown[];
+  scenes: Array<{ name: string; location: string; atmosphere: string; timeWeather: string; evidence: string[] }>;
+  characters: Array<{ name: string; aliases: string[]; stableDescription: string; evidence: string[]; firstAppearance: string }>;
+  shots: Array<{ sequence: number; sceneName: string; title: string; scriptExcerpt: string; evidence: string[];
+    durationMs: number; shotSize: string; movement: string; promptText: string; characterNames: string[];
+    dialogue: Array<{ kind: DialogueKind; speakerName?: string; listenerName?: string; text: string; emotion?: string; voiceProfile?: string }> }>;
+};
+
+export class ProductionCatalog {
+  constructor(readonly db: Database) {
+    db.exec("PRAGMA foreign_keys = ON;");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS schema_migration (
+        version INTEGER PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS production_project (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        source_kind TEXT NOT NULL CHECK (source_kind IN ('synopsis','novel','script')),
+        source_text TEXT NOT NULL,
+        workflow_state TEXT NOT NULL DEFAULT 'draft' CHECK (workflow_state IN ('draft','analyzing','producing','paused','completed')),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS story_analysis (
+        project_id TEXT PRIMARY KEY REFERENCES production_project(id),
+        events_json TEXT NOT NULL,
+        relations_json TEXT NOT NULL,
+        version INTEGER NOT NULL CHECK (version >= 1),
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS production_episode (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES production_project(id),
+        episode_number INTEGER NOT NULL CHECK (episode_number >= 1),
+        title TEXT NOT NULL,
+        logline TEXT NOT NULL DEFAULT '',
+        outline_json TEXT NOT NULL DEFAULT '[]',
+        script_json TEXT NOT NULL DEFAULT '[]',
+        review_state TEXT NOT NULL DEFAULT 'draft' CHECK (review_state IN ('draft','confirmed','changes_requested')),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE (project_id, episode_number)
+      );
+      CREATE TABLE IF NOT EXISTS production_scene (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES production_project(id),
+        name TEXT NOT NULL,
+        canonical_name TEXT NOT NULL,
+        location TEXT NOT NULL DEFAULT '',
+        atmosphere TEXT NOT NULL DEFAULT '',
+        time_weather TEXT NOT NULL DEFAULT '',
+        evidence_json TEXT NOT NULL DEFAULT '[]',
+        locked INTEGER NOT NULL DEFAULT 0 CHECK (locked IN (0,1)),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE (project_id, canonical_name)
+      );
+      CREATE TABLE IF NOT EXISTS production_asset (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES production_project(id),
+        kind TEXT NOT NULL CHECK (kind IN ('character','prop','costume')),
+        name TEXT NOT NULL,
+        canonical_name TEXT NOT NULL,
+        aliases_json TEXT NOT NULL DEFAULT '[]',
+        stable_description TEXT NOT NULL DEFAULT '',
+        evidence_json TEXT NOT NULL DEFAULT '[]',
+        first_appearance TEXT NOT NULL DEFAULT '',
+        variant_of TEXT REFERENCES production_asset(id),
+        locked INTEGER NOT NULL DEFAULT 0 CHECK (locked IN (0,1)),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE (project_id, kind, canonical_name)
+      );
+      CREATE TABLE IF NOT EXISTS production_shot (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES production_project(id),
+        episode_id TEXT NOT NULL REFERENCES production_episode(id),
+        sequence INTEGER NOT NULL CHECK (sequence >= 1),
+        scene_id TEXT REFERENCES production_scene(id),
+        title TEXT NOT NULL DEFAULT '',
+        script_excerpt TEXT NOT NULL,
+        evidence_json TEXT NOT NULL DEFAULT '[]',
+        shot_size TEXT NOT NULL DEFAULT '',
+        camera_angle TEXT NOT NULL DEFAULT '',
+        movement TEXT NOT NULL DEFAULT '',
+        action_beats_json TEXT NOT NULL DEFAULT '[]',
+        duration_ms INTEGER NOT NULL DEFAULT 5000 CHECK (duration_ms > 0),
+        prompt_text TEXT NOT NULL DEFAULT '',
+        prompt_version INTEGER NOT NULL DEFAULT 0 CHECK (prompt_version >= 0),
+        review_state TEXT NOT NULL DEFAULT 'draft' CHECK (review_state IN ('draft','confirmed','changes_requested')),
+        runtime_state TEXT NOT NULL DEFAULT 'idle' CHECK (runtime_state IN ('idle','queued','running','paused','failed','succeeded')),
+        video_readiness TEXT NOT NULL DEFAULT 'blocked' CHECK (video_readiness IN ('blocked','ready')),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE (episode_id, sequence)
+      );
+      CREATE TABLE IF NOT EXISTS shot_character_link (
+        shot_id TEXT NOT NULL REFERENCES production_shot(id),
+        character_id TEXT NOT NULL REFERENCES production_asset(id),
+        costume_id TEXT REFERENCES production_asset(id),
+        PRIMARY KEY (shot_id, character_id)
+      );
+      CREATE TABLE IF NOT EXISTS shot_dialogue (
+        id TEXT PRIMARY KEY,
+        shot_id TEXT NOT NULL REFERENCES production_shot(id),
+        sequence INTEGER NOT NULL CHECK (sequence >= 1),
+        kind TEXT NOT NULL CHECK (kind IN ('dialogue','narration','voiceover','phone')),
+        speaker_id TEXT REFERENCES production_asset(id),
+        listener_id TEXT REFERENCES production_asset(id),
+        text TEXT NOT NULL,
+        emotion TEXT NOT NULL DEFAULT '',
+        voice_profile TEXT NOT NULL DEFAULT '',
+        UNIQUE (shot_id, sequence)
+      );
+      CREATE TABLE IF NOT EXISTS extracted_candidate (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES production_project(id),
+        episode_id TEXT NOT NULL REFERENCES production_episode(id),
+        shot_id TEXT NOT NULL REFERENCES production_shot(id),
+        kind TEXT NOT NULL CHECK (kind IN ('character','scene','prop','costume','dialogue')),
+        candidate_json TEXT NOT NULL,
+        evidence_json TEXT NOT NULL,
+        confidence REAL NOT NULL CHECK (confidence BETWEEN 0 AND 1),
+        state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','linked','ignored')),
+        linked_entity_id TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS production_shot_episode_order ON production_shot(episode_id, sequence);
+      CREATE INDEX IF NOT EXISTS extracted_candidate_state ON extracted_candidate(project_id, state, kind);
+    `);
+    db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (2, ?) ON CONFLICT(version) DO NOTHING`)
+      .run(Date.now());
+  }
+
+  private atomic<T>(operation: () => T): T {
+    this.db.exec("BEGIN IMMEDIATE");
+    try { const value = operation(); this.db.exec("COMMIT"); return value; }
+    catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
+
+  withTransaction<T>(operation: () => T): T { return this.atomic(operation); }
+
+  importStory(input: { title: string; sourceKind: SourceKind; sourceText: string }) {
+    if (!input.title.trim() || !input.sourceText.trim()) throw new TypeError("Story title and source text are required.");
+    const id = randomUUID();
+    const now = Date.now();
+    this.db.query(`INSERT INTO production_project(id, title, source_kind, source_text, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(id, input.title.trim(), input.sourceKind, input.sourceText, now, now);
+    return id;
+  }
+
+  saveStoryAnalysis(projectId: string, analysis: { events: unknown[]; relations: unknown[] }, version: number) {
+    if (!Number.isSafeInteger(version) || version < 1) throw new RangeError("Analysis version must be positive.");
+    if (!Array.isArray(analysis.events) || !Array.isArray(analysis.relations)) throw new TypeError("Events and relations must be arrays.");
+    this.db.query(`INSERT INTO story_analysis(project_id, events_json, relations_json, version, updated_at)
+      VALUES (?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET events_json = excluded.events_json,
+      relations_json = excluded.relations_json, version = excluded.version, updated_at = excluded.updated_at`)
+      .run(projectId, JSON.stringify(analysis.events), JSON.stringify(analysis.relations), version, Date.now());
+  }
+
+  createEpisode(projectId: string, episodeNumber: number, title: string, logline = "") {
+    if (!Number.isSafeInteger(episodeNumber) || episodeNumber < 1 || !title.trim()) throw new TypeError("Episode number and title are required.");
+    const id = randomUUID();
+    const now = Date.now();
+    this.db.query(`INSERT INTO production_episode(id, project_id, episode_number, title, logline, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(id, projectId, episodeNumber, title.trim(), logline, now, now);
+    return id;
+  }
+
+  saveEpisodeScript(episodeId: string, script: unknown[], reviewState: ReviewState = "draft") {
+    if (!Array.isArray(script) || script.length === 0) throw new TypeError("Episode script must contain structured scenes.");
+    this.db.query(`UPDATE production_episode SET script_json = ?, review_state = ?, updated_at = ? WHERE id = ?`)
+      .run(JSON.stringify(script), reviewState, Date.now(), episodeId);
+  }
+
+  saveEpisodeOutline(episodeId: string, outline: string[]) {
+    if (!outline.length || outline.some((beat) => !beat.trim())) throw new TypeError("Episode outline needs non-empty beats.");
+    const updated = this.db.query(`UPDATE production_episode SET outline_json = ?, updated_at = ? WHERE id = ?`)
+      .run(JSON.stringify(outline), Date.now(), episodeId);
+    if (!updated.changes) throw new Error(`Unknown episode: ${episodeId}`);
+  }
+
+  upsertScene(input: { id?: string; projectId: string; name: string; location?: string; atmosphere?: string;
+    timeWeather?: string; evidence: unknown[] }) {
+    if (!input.projectId.trim() || !input.name.trim() || !Array.isArray(input.evidence)) throw new TypeError("Scene name and evidence are required.");
+    const canonicalName = input.name.trim().toLocaleLowerCase();
+    const existing = input.id ? this.db.query(`SELECT id, locked FROM production_scene WHERE id = ? AND project_id = ?`)
+      .get(input.id, input.projectId) as { id: string; locked: number } | null
+      : this.db.query(`SELECT id, locked FROM production_scene WHERE project_id = ? AND canonical_name = ?`)
+        .get(input.projectId, canonicalName) as { id: string; locked: number } | null;
+    if (existing?.locked) throw new Error("Locked scene assets cannot be overwritten.");
+    const id = existing?.id ?? input.id ?? randomUUID();
+    const now = Date.now();
+    this.db.query(`INSERT INTO production_scene(id, project_id, name, canonical_name, location, atmosphere,
+      time_weather, evidence_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET name = excluded.name, canonical_name = excluded.canonical_name,
+      location = excluded.location, atmosphere = excluded.atmosphere, time_weather = excluded.time_weather,
+      evidence_json = excluded.evidence_json, updated_at = excluded.updated_at`)
+      .run(id, input.projectId, input.name.trim(), canonicalName, input.location ?? "", input.atmosphere ?? "",
+        input.timeWeather ?? "", JSON.stringify(input.evidence), now, now);
+    return id;
+  }
+
+  upsertAsset(input: { id?: string; projectId: string; kind: AssetKind; name: string; aliases?: string[];
+    stableDescription?: string; evidence: unknown[]; firstAppearance?: string; variantOf?: string }) {
+    if (!input.projectId.trim() || !input.name.trim() || !Array.isArray(input.evidence)) throw new TypeError("Asset name and evidence are required.");
+    const canonicalName = input.name.trim().toLocaleLowerCase();
+    const existing = input.id ? this.db.query(`SELECT id, locked FROM production_asset WHERE id = ? AND project_id = ?`)
+      .get(input.id, input.projectId) as { id: string; locked: number } | null
+      : this.db.query(`SELECT id, locked FROM production_asset WHERE project_id = ? AND kind = ? AND canonical_name = ?`)
+        .get(input.projectId, input.kind, canonicalName) as { id: string; locked: number } | null;
+    if (existing?.locked) throw new Error("Locked assets cannot be overwritten.");
+    const id = existing?.id ?? input.id ?? randomUUID();
+    const now = Date.now();
+    this.db.query(`INSERT INTO production_asset(id, project_id, kind, name, canonical_name, aliases_json,
+      stable_description, evidence_json, first_appearance, variant_of, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET name = excluded.name, canonical_name = excluded.canonical_name,
+      aliases_json = excluded.aliases_json, stable_description = excluded.stable_description,
+      evidence_json = excluded.evidence_json, first_appearance = excluded.first_appearance,
+      variant_of = excluded.variant_of, updated_at = excluded.updated_at`)
+      .run(id, input.projectId, input.kind, input.name.trim(), canonicalName, JSON.stringify(input.aliases ?? []),
+        input.stableDescription ?? "", JSON.stringify(input.evidence), input.firstAppearance ?? "",
+        input.variantOf ?? null, now, now);
+    return id;
+  }
+
+  setAssetLocked(assetId: string, locked: boolean) {
+    const updated = this.db.query(`UPDATE production_asset SET locked = ?, updated_at = ? WHERE id = ?`)
+      .run(locked ? 1 : 0, Date.now(), assetId);
+    if (!updated.changes) throw new Error(`Unknown production asset: ${assetId}`);
+  }
+
+  createShot(input: { projectId: string; episodeId: string; sequence: number; sceneId?: string;
+    title?: string; scriptExcerpt: string; evidence: unknown[]; durationMs?: number; shotSize?: string; movement?: string }) {
+    if (!input.projectId.trim() || !input.episodeId.trim() || !Number.isSafeInteger(input.sequence)
+      || input.sequence < 1 || !input.scriptExcerpt.trim() || !Array.isArray(input.evidence)) {
+      throw new TypeError("Shot requires an episode, sequence, script excerpt and evidence.");
+    }
+    const episode = this.db.query(`SELECT project_id FROM production_episode WHERE id = ?`).get(input.episodeId) as { project_id: string } | null;
+    if (!episode || episode.project_id !== input.projectId) throw new Error("Shot episode must belong to the selected project.");
+    if (input.sceneId) {
+      const scene = this.db.query(`SELECT project_id FROM production_scene WHERE id = ?`).get(input.sceneId) as { project_id: string } | null;
+      if (!scene || scene.project_id !== input.projectId) throw new Error("Shot scene must belong to the selected project.");
+    }
+    const id = randomUUID();
+    const now = Date.now();
+    this.db.query(`INSERT INTO production_shot(id, project_id, episode_id, sequence, scene_id, title,
+      script_excerpt, evidence_json, duration_ms, shot_size, movement, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, input.projectId, input.episodeId, input.sequence, input.sceneId ?? null, input.title ?? "",
+        input.scriptExcerpt, JSON.stringify(input.evidence), input.durationMs ?? 5000, input.shotSize ?? "",
+        input.movement ?? "", now, now);
+    return id;
+  }
+
+  addDialogue(input: { shotId: string; sequence: number; kind: DialogueKind; speakerId?: string;
+    listenerId?: string; text: string; emotion?: string; voiceProfile?: string }) {
+    if (!input.shotId.trim() || !Number.isSafeInteger(input.sequence) || input.sequence < 1 || !input.text.trim()) {
+      throw new TypeError("Dialogue requires a shot, sequence and text.");
+    }
+    if (input.kind === "dialogue" && !input.speakerId) throw new TypeError("Native dialogue needs a speaker.");
+    const id = randomUUID();
+    this.db.query(`INSERT INTO shot_dialogue(id, shot_id, sequence, kind, speaker_id, listener_id, text, emotion, voice_profile)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, input.shotId, input.sequence, input.kind, input.speakerId ?? null, input.listenerId ?? null,
+        input.text, input.emotion ?? "", input.voiceProfile ?? "");
+    return id;
+  }
+
+  setShotWorkflowState(shotId: string, input: { reviewState?: ReviewState; runtimeState?: RuntimeState;
+    videoReadiness?: VideoReadiness }) {
+    const current = this.db.query(`SELECT review_state AS reviewState, runtime_state AS runtimeState,
+      video_readiness AS videoReadiness FROM production_shot WHERE id = ?`)
+      .get(shotId) as { reviewState: ReviewState; runtimeState: RuntimeState; videoReadiness: VideoReadiness } | null;
+    if (!current) throw new Error(`Unknown production shot: ${shotId}`);
+    const updated = { ...current, ...input };
+    if (updated.videoReadiness === "ready" && updated.reviewState !== "confirmed") {
+      throw new Error("A shot is video-ready only after its content review is confirmed.");
+    }
+    this.db.query(`UPDATE production_shot SET review_state = ?, runtime_state = ?, video_readiness = ?, updated_at = ? WHERE id = ?`)
+      .run(updated.reviewState ?? "pending", updated.runtimeState ?? "idle", updated.videoReadiness ?? "not_ready", Date.now(), shotId);
+  }
+
+  setShotPrompt(shotId: string, promptText: string) {
+    if (!promptText.trim()) throw new TypeError("Shot prompt cannot be empty.");
+    const updated = this.db.query(`UPDATE production_shot SET prompt_text = ?, prompt_version = prompt_version + 1,
+      updated_at = ? WHERE id = ?`).run(promptText, Date.now(), shotId);
+    if (!updated.changes) throw new Error(`Unknown production shot: ${shotId}`);
+  }
+
+  linkCharacterToShot(shotId: string, characterId: string, costumeId?: string) {
+    const shot = this.db.query(`SELECT project_id FROM production_shot WHERE id = ?`).get(shotId) as { project_id: string } | null;
+    const character = this.db.query(`SELECT project_id, kind FROM production_asset WHERE id = ?`).get(characterId) as { project_id: string; kind: string } | null;
+    if (!shot || !character || shot.project_id !== character.project_id || character.kind !== "character") {
+      throw new Error("Shot character must be a character asset in the same project.");
+    }
+    if (costumeId) {
+      const costume = this.db.query(`SELECT project_id, kind FROM production_asset WHERE id = ?`).get(costumeId) as { project_id: string; kind: string } | null;
+      if (!costume || costume.project_id !== shot.project_id || costume.kind !== "costume") {
+        throw new Error("Shot costume must be a costume asset in the same project.");
+      }
+    }
+    this.db.query(`INSERT INTO shot_character_link(shot_id, character_id, costume_id) VALUES (?, ?, ?)
+      ON CONFLICT(shot_id, character_id) DO UPDATE SET costume_id = excluded.costume_id`)
+      .run(shotId, characterId, costumeId ?? null);
+  }
+
+  addExtractedCandidate(input: { projectId: string; episodeId: string; shotId: string;
+    kind: "character" | "scene" | "prop" | "costume" | "dialogue"; value: unknown; evidence: unknown[]; confidence: number }) {
+    if (!Array.isArray(input.evidence) || input.evidence.length === 0 || !Number.isFinite(input.confidence)
+      || input.confidence < 0 || input.confidence > 1) throw new TypeError("Candidates require source evidence and confidence from 0 to 1.");
+    const id = randomUUID();
+    this.db.query(`INSERT INTO extracted_candidate(id, project_id, episode_id, shot_id, kind, candidate_json,
+      evidence_json, confidence, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, input.projectId, input.episodeId, input.shotId, input.kind, JSON.stringify(input.value),
+        JSON.stringify(input.evidence), input.confidence, Date.now());
+    return id;
+  }
+
+  resolveCandidate(candidateId: string, state: Exclude<CandidateState, "pending">, linkedEntityId?: string) {
+    if (state === "linked" && !linkedEntityId?.trim()) throw new TypeError("Linking a candidate requires an entity ID.");
+    const updated = this.db.query(`UPDATE extracted_candidate SET state = ?, linked_entity_id = ?
+      WHERE id = ? AND state = 'pending'`).run(state, state === "linked" ? linkedEntityId! : null, candidateId);
+    if (!updated.changes) throw new Error("Only a pending extraction candidate can be resolved.");
+  }
+
+  validateEpisodeForSynthesis(episodeId: string) {
+    const shots = this.db.query(`SELECT id, sequence, scene_id AS sceneId, script_excerpt AS scriptExcerpt,
+      review_state AS reviewState, video_readiness AS videoReadiness FROM production_shot
+      WHERE episode_id = ? ORDER BY sequence`).all(episodeId) as Array<{
+        id: string; sequence: number; sceneId: string | null; scriptExcerpt: string;
+        reviewState: ReviewState; videoReadiness: VideoReadiness;
+      }>;
+    const characters = this.db.query(`SELECT COUNT(DISTINCT l.character_id) AS count FROM shot_character_link l
+      JOIN production_shot s ON s.id = l.shot_id WHERE s.episode_id = ?`).get(episodeId) as { count: number };
+    const scenes = new Set(shots.map((shot) => shot.sceneId).filter(Boolean));
+    const issues: string[] = [];
+    if (shots.length < 8 || shots.length > 12) issues.push("Episode needs 8 to 12 shots for acceptance.");
+    if (characters.count < 2) issues.push("Episode needs at least two linked characters.");
+    if (scenes.size < 3) issues.push("Episode needs at least three distinct scenes.");
+    if (shots.some((shot) => shot.reviewState !== "confirmed" || shot.videoReadiness !== "ready")) {
+      issues.push("All shots must be confirmed and video-ready.");
+    }
+    if (shots.some((shot) => !shot.scriptExcerpt.trim())) issues.push("Every shot needs a script excerpt.");
+    return { ready: issues.length === 0, issues, shotCount: shots.length, characterCount: characters.count, sceneCount: scenes.size };
+  }
+}
+
+/** Persist a validated Jellyfish-style structured draft atomically; this function never calls a model. */
+export function applyEpisodeDraft(catalog: ProductionCatalog, projectId: string, draft: EpisodeDraft) {
+  if (!projectId.trim() || !Number.isSafeInteger(draft.episodeNumber) || draft.episodeNumber < 1
+    || !draft.title.trim() || !draft.logline.trim() || !draft.outline.length || !draft.script.length) {
+    throw new TypeError("Episode draft is missing its identity, outline, or script.");
+  }
+  if (draft.characters.length < 2 || draft.scenes.length < 3 || draft.shots.length < 8 || draft.shots.length > 12) {
+    throw new Error("Acceptance draft requires at least two characters, three scenes, and eight to twelve shots.");
+  }
+  const characterNames = new Map<string, string>();
+  for (const character of draft.characters) {
+    const key = character.name.trim().toLocaleLowerCase();
+    if (!key || characterNames.has(key) || !character.stableDescription.trim() || !character.evidence.length) {
+      throw new Error("Character names must be unique and include descriptions and source evidence.");
+    }
+    characterNames.set(key, character.name);
+  }
+  const sceneNames = new Map<string, string>();
+  for (const scene of draft.scenes) {
+    const key = scene.name.trim().toLocaleLowerCase();
+    if (!key || sceneNames.has(key) || !scene.evidence.length) throw new Error("Scene names must be unique and include source evidence.");
+    sceneNames.set(key, scene.name);
+  }
+  const sequences = new Set<number>();
+  for (const shot of draft.shots) {
+    if (!Number.isSafeInteger(shot.sequence) || shot.sequence < 1 || sequences.has(shot.sequence)
+      || !shot.scriptExcerpt.trim() || !shot.evidence.length || !Number.isSafeInteger(shot.durationMs) || shot.durationMs < 1
+      || !sceneNames.has(shot.sceneName.trim().toLocaleLowerCase()) || !shot.characterNames.length) {
+      throw new Error("Each shot needs a unique sequence, scene, script evidence, duration, and at least one character.");
+    }
+    sequences.add(shot.sequence);
+    for (const name of shot.characterNames) if (!characterNames.has(name.trim().toLocaleLowerCase())) {
+      throw new Error(`Shot references an unknown character: ${name}`);
+    }
+    for (const line of shot.dialogue) {
+      if (!line.text.trim() || (line.kind === "dialogue" && (!line.speakerName
+        || !characterNames.has(line.speakerName.trim().toLocaleLowerCase())))) {
+        throw new Error("Dialogue lines must contain text and native dialogue must resolve a character speaker.");
+      }
+    }
+  }
+
+  return catalog.withTransaction(() => {
+    const sceneIds = new Map<string, string>();
+    for (const scene of draft.scenes) {
+      const id = catalog.upsertScene({ projectId, ...scene });
+      sceneIds.set(scene.name.trim().toLocaleLowerCase(), id);
+    }
+    const characterIds = new Map<string, string>();
+    for (const character of draft.characters) {
+      const id = catalog.upsertAsset({ projectId, kind: "character", ...character });
+      characterIds.set(character.name.trim().toLocaleLowerCase(), id);
+    }
+    const episodeId = catalog.createEpisode(projectId, draft.episodeNumber, draft.title, draft.logline);
+    catalog.saveEpisodeOutline(episodeId, draft.outline);
+    catalog.saveEpisodeScript(episodeId, draft.script);
+    const shotIds: string[] = [];
+    for (const shot of draft.shots) {
+      const shotId = catalog.createShot({ projectId, episodeId, sequence: shot.sequence,
+        sceneId: sceneIds.get(shot.sceneName.trim().toLocaleLowerCase()), title: shot.title,
+        scriptExcerpt: shot.scriptExcerpt, evidence: shot.evidence, durationMs: shot.durationMs,
+        shotSize: shot.shotSize, movement: shot.movement });
+      shotIds.push(shotId);
+      if (shot.promptText.trim()) catalog.setShotPrompt(shotId, shot.promptText);
+      for (const name of shot.characterNames) catalog.linkCharacterToShot(shotId,
+        characterIds.get(name.trim().toLocaleLowerCase())!);
+      for (const [index, line] of shot.dialogue.entries()) {
+        catalog.addDialogue({ shotId, sequence: index + 1, kind: line.kind,
+          speakerId: line.speakerName ? characterIds.get(line.speakerName.trim().toLocaleLowerCase()) : undefined,
+          listenerId: line.listenerName ? characterIds.get(line.listenerName.trim().toLocaleLowerCase()) : undefined,
+          text: line.text, emotion: line.emotion, voiceProfile: line.voiceProfile });
+      }
+    }
+    return { episodeId, shotIds, characterIds: [...characterIds.values()], sceneIds: [...sceneIds.values()], awaitingReview: true };
+  });
+}

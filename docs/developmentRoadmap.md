@@ -1,0 +1,229 @@
+# Toonflow 短剧生产系统开发路线图
+
+日期：2026-11-06  
+状态：用户已确认 D1–D9 建议并授权进入阶段 1；阶段 1 尚未完成。官方上游浅克隆在 work/toonflow-upstream/，HEAD 为 6086cdffceb704a632eca143dd16cd461a78cdac；本地和当前浏览器会话均未定位用户 fork。隔离候选核心已有 Mock QA，但不计为 Toonflow 阶段完成或宿主集成。
+
+## 推进规则
+
+- 阶段 0 产物在 Codex outputs/，不是 Git 仓库 docs/；本机 Toonflow 快照不是用户 fork 的 Git checkout。
+- 每阶段完成实现、适用验证、更新文档和授权的 Git 提交后，报告结果并停下等待用户确认。
+- 真实模型调用默认禁用；用户必须预先明确素材/提示词、调用次数和该阶段最高人民币金额。
+- 按 Toonflow 目标 fork 的 AGENTS.md 执行；D2 已确认仅允许仓库顶层 `qa/` 放验证代码，产品包不包含 QA；不增加测试框架、产品测试脚本或 CI 测试入口。
+- 先做手写结构剧本的一集 Mock 闭环，再扩展小说分析和多集调度。
+- 所有付费路径均通过就绪检查、提示词检查、幂等检查和事务性预算预留。
+
+## 阶段 0：审计（只读）
+
+交付：projectAudit.md、developmentRoadmap.md、masterPlan.md。  
+完成：源码事实、缺失能力、Jellyfish 移植映射、方舟关键接口与风险已整理。  
+遗留：当前 checkout 是官方 upstream/master，不是用户 fork；`sd25-pe` Skill 正文未读取，且用户已决定暂不安装。D1–D9 建议已确认。  
+下一步条件：定位用户 fork checkout；D8 保持真实调用预算为 0，直到用户另行批准素材/提示词、调用次数和金额上限。
+
+## 阶段 1：运行基线与 Windows 环境
+
+- 在目标 fork 上安装锁定版本 Bun，检查 Git、FFmpeg/FFprobe、磁盘和数据路径。
+- apps/server/src/index.ts 最小修改，主服务显式绑定 127.0.0.1；保留 Mobile Link 的独立、显式开启和独立端口。
+- 验证桌面启动与生产打包路径；确认 bun:sqlite 在目标 Bun/Windows 环境可用。
+- 新增 scripts/windows/ 环境检查、初始化、启动/停止、日志和备份脚本。
+- 记录画布、Agent、插件市场、工作区等原有功能的运行基线。
+
+验收：开发环境可重复启动；监听符合规范；桌面端连接正常；FFmpeg 缺失时能按现有流程询问或下载。暂不调用模型。
+
+## 阶段 2：生产数据底座（零费用）
+
+- 建立 @toonflow/production、项目库和全局库、迁移与 repository。
+- 项目库位置为项目工作区/.production/production.db；全局库位置为 Toonflow 数据目录/production/global.db。
+- 项目库保存项目、剧集、剧本版本、实体、资产、segment/shot、promptVersion、generationTask、mediaOutput、renderJob、reviewResult。
+- 全局库保存 priceRule、budget、budgetLog、costLedger、promptTemplate。
+- 启用 SQLite WAL；预算预留与 generation_task 创建由同一 BEGIN IMMEDIATE 事务完成。
+- 实现幂等键、成本估算/预留/结算/释放、Mock Provider、状态机骨架。
+- 覆盖画布手动生成与生产层入口，不改变 Toonflow 执行层恢复语义。
+
+验收：重复幂等请求不重复提交；进程关键点退出后恢复原任务；70%提醒、90%暂停视频、100%拦截；账本和预算计算一致。验证方式需先遵守用户决定的 D2。
+
+## 阶段 3：方舟适配器与单集 Mock 闭环
+
+- 新增 packages/providers/src/media/volcengine.ts，复用 ProviderDefinition、saveTaskData、resumeTask、getPrice。
+- 为录音文件识别实现独立服务适配器。
+- 先用 Mock 完成手写剧本 → 资产 → segment → prompt → 视频 → 字幕 → 合成流程。
+- 按官方 Seedance API 实现异步创建、查询、错误映射、return_last_frame、素材请求和恢复；Seedream/TTS 按真实 API schema 适配。
+- 实现 Seedance 2.5/2.0 各自 Prompt 编译器、参数校验和静态提示词检查。
+- 记录每个任务请求快照（去密钥）、价格快照、usage 和结算状态。
+- 用户未批准真实调用和金额上限时只运行 Mock。
+
+验收：Mock 产出可播放 MP4；费用归属到片段；合成/字幕变化不会重复生成；真实小样在获用户逐项批准后才执行并与平台账单对账。
+
+## 阶段 3.5：提示词和参数基准（付费闸门）
+
+- 固定一场戏、2 名角色、3 个片段，按总则比较 A/B 模板。
+- 每组每片段 3 次 480p Draft 样片，并计入每次 Draft 成本；后续正片任务单独预算。
+- 验证模型限制、角色素材顺序、原始脸素材到期规则、动漫/3D审核表现、片段时长、TTS语速等。
+- 对照报告记录一次通过率、失败原因、平台审核和实际费用。
+
+进入阶段 4 的条件：B 组显著优于 A 组；否则先优化模板。所有真实请求都要事先明确素材、次数和花费上限。
+
+## 阶段 4：资产与候选确认
+
+- 移植 Jellyfish 的候选、实体查重/合并、稳定 ID、别名、首次出场证据与变体。
+- 建立角色/场景/道具/服装、资产图、voiceProfile；支持锁定、版本和使用记录。
+- 人脸资产保存原始哈希、模型、时间、信任期限；到期预警按 D1 方案工作。
+- 支持自动/人工候选确认，并保留来源证据。
+
+验收：同一实体跨片段复用；锁定资产不被覆盖；有冲突时等待确认。
+
+## 阶段 5：分镜、片段和画布投影
+
+- 实现 Jellyfish Shot/ShotDetail、FrameImage、DialogLine、CharacterLink 逻辑的 TypeScript 表达。
+- 生产生成单位为 segment；Jellyfish shot 是 segment 下的描述元素。
+- 实现片段划分、提示词版本、素材顺序、连续性上下文与 readiness。
+- 画布投影一次性生成并附对象 ID/版本；用户通过“采用画布结果”显式回写。
+- 画布媒体任务接入同一预算与幂等守卫。
+
+验收：总则指定的 8–12 个镜头生成合规片段；采用画布修改产生可追踪新版本。
+
+## 阶段 6：配音、识别、字幕
+
+- 逐句 TTS、音色缓存、豆包录音文件识别、时间戳对齐、SRT/ASS 与发音替换表。
+- 每句记录文本、音色、参数、任务、费用和输出哈希。
+
+验收：改一句只重做一句；字幕偏差阈值依据 3.5 实测设定；成本入账。
+
+## 阶段 7：合成与质量检查
+
+- 复用 @toonflow/ffmpeg，新增确定性转码、拼接、淡出、字幕和 BGM 轨。
+- 新增成片版本、导出历史、规则质检和可选 AI 检查。
+- 对 1080p HEVC/10bit 源视频统一转为目标 H.264/AAC。
+
+验收：重新合成不触发模型；发现黑屏、静音、格式不符等问题；质量证据可追溯。
+
+## 阶段 8：小说导入和编剧
+
+- 支持 TXT/DOCX/Markdown/粘贴文本；DOCX 用 AnyDoc 的 Windows/Bun 实际行为先行验证。
+- 编码检测、章节切分、原文段落编号、逐章提取事件/角色/关系/状态。
+- 建立证据索引与 FTS5；完成改编规划、分集、剧本版本与回滚。
+
+验收：中篇故事能输出事件、关系、分集与第一集结构剧本；每条事实都能回溯原文段落。
+
+## 阶段 9：调度与批量生产
+
+- 持久化单进程队列；实现自动/半自动/逐步、暂停/继续/取消、优先级、并发、超时和限流退避。
+- 按预算、连续失败、余额和素材到期状态暂停。
+- 状态重启后从生产库读取；不重复提交已有供应商任务。
+
+验收：批量多集停止/恢复可用；预算到阈值时不创建新付费任务。
+
+## 阶段 10：生产界面、Agent 与 MCP
+
+- 新增项目首页、剧本工作台、资产库、分镜工作台、生产控制台、成本中心、成片管理。
+- 生产界面请求统一封装在 API 客户端中。
+- Agent/MCP 提供查询、版本修改、受控重做和画布投影工具；付费调用仍由生产服务把关。
+
+验收：界面操作对应真实业务；Agent 不能绕过预算、幂等和人工确认。
+
+## 阶段 11：Windows 打包与完整验收
+
+- 继续 Electrobun 安装流程；交付安装包、配置、开通、价格录入、备份恢复和故障说明。
+- 执行总则第 19 节各场景；将 Mock 结果与真实批准调用分开记录。
+
+验收：从 Windows 干净环境安装/启动/恢复/备份通过；所有真实调用在预先批准的预算内；核对账本与平台用量。
+
+## 关键新增与修改文件
+
+新增目录：
+- packages/production/src/db、pipeline、steps、prompt、budget、tasks、scheduler、render、review、canvasProjection
+- packages/providers/src/media/volcengine.ts
+- packages/production/src/asr/volcengineAsr.ts
+- apps/server/src/routes/production/
+- apps/server/src/utils/production/
+- apps/web/src/pages/production/
+- scripts/windows/
+- docs/thirdPartyNotices.md
+
+可能需要最小修改：
+- apps/server/src/index.ts：主服务监听地址
+- apps/server/src/utils/media/tasks.ts 或统一入口：生产工作区预算钩子
+- apps/server/src/routes/ai/media/generate.ts：生产任务归属/幂等接入
+- apps/server/src/agent/tools/index.ts：注册受控工具
+- apps/web/src/router/index.ts：生产路由
+- router.ts：仅运行生成器更新，禁止手改
+
+## 风险控制
+
+| 风险 | 控制 |
+|---|---|
+| fork 与压缩包版本差异 | 阶段 1 锁定目标仓库、分支和提交并重新审计 |
+| bun:sqlite / Electrobun 不兼容 | 阶段 1 在目标 Windows/Bun 版本验证 |
+| API 价格、用量和限额漂移 | 不硬编码；记录价格与请求快照，按返回 usage 对账 |
+| 结果 URL 过期 | 成功后立即下载并做哈希检查 |
+| 人脸素材到期或审核失败 | D1 选方案；未获真实调用批准前不测付费模型 |
+| AGENTS 测试限制 | 按 D2 决定；未确认不添加测试代码 |
+| 画布绕过预算 | 在共享媒体生成路径增加生产工作区守卫 |
+| HEVC/10bit 播放兼容 | FFmpeg 导出统一 H.264/AAC |
+| TOS 费用/可访问性 | D5 根据素材传输方案与用户账号决定 |
+
+## 阶段 0 交付状态
+
+审计文档已保存到 Codex 工作区输出目录。它们没有写入用户 fork，也没有 Git 提交。用户已确认决策并授权阶段 1；阶段 1 仍待在目标 fork 中完成。
+
+## 2026-11-06 基线复核
+
+- 当前可见 checkout 的 `origin` 是 `https://github.com/HBAI-Ltd/Toonflow-app.git`，分支为干净的 `master...origin/master`；它是官方 upstream，不是用户 fork。桌面上也没有打开 Toonflow/GitHub 窗口，且资源管理器窗口处于最小化状态。未将任何用户身份信息发往外部搜索。
+- 工作区 Bun 1.4.3 可用；隔离候选使用 `bun:sqlite` 的 QA 通过，验证此 Bun 上该数据库模块可运行。候选 QA 为 31 项通过、0 失败、140 个断言；候选源码与 QA 的严格 TypeScript 检查和 mock Ark 请求冒烟通过。
+- 官方 upstream 的全工作区 `bun run typecheck` 通过（含 server、desktop、web、mobile 与各 workspace 包）。该结果是基线验证，不代表新增功能已集成。
+- 官方 `apps/server/src/index.ts` 当前调用 `app.listen(realPort, ...)`，没有显式绑定 `127.0.0.1`；本机 `@toonflow/ffmpeg` 检测未找到系统或本地数据目录中的 ffmpeg/ffprobe。按用户选定的 fork 基线要求，这两项只能在正确的目标 checkout 中实施和验收。
+- 真实方舟调用与费用均保持 0；只有在用户为阶段 3 明确提供素材/提示词、调用次数和人民币上限后才可发起。
+
+## 隔离候选实现进度（不代表阶段验收）
+
+因目标 fork 尚未定位，独立候选位于 `work/production-candidate/`，未改动官方上游。当前含结构化故事/剧集/资产/镜头/对白目录、共享全局预算账本、任务幂等与对账、片段重做、人脸信任到期、24 小时下载重试、提示词本地拦截、版本化 Mock 合成，以及只在显式调用时才发送 HTTP 请求的 Seedance 2.5 适配器。此适配器将费用未知的成功视频留在预算预留中，等待手工对账。已用工作区内 Bun 1.4.3 执行隔离候选 QA：31 项通过、0 失败、140 个断言；严格 TypeScript 检查及 Mock Ark 提交/轮询冒烟通过。官方基线 server 与 ffmpeg 包 typecheck 也通过，但该 checkout 仍是官方 master 而非用户 fork；本机未找到 PATH 中可用的 FFmpeg/FFprobe。以上不能代替 Toonflow 集成、真实 FFmpeg/Windows 验收或最终 1–15 场景验收。真实 API 调用与费用均为 0。
+
+### 恢复开发后的产物保护修复
+
+下载入队、合成输出登记与产物完成登记统一检查路径占用，按 Windows 的大小写和斜杠规则识别同一路径；成功任务再次进入供应商轮询时直接返回已成功，费用通过独立账本结算。新增路径冲突与成功后供应商离线的回归验证。候选当前 31 项 QA 通过、140 个断言，源码及 QA 严格 TypeScript 检查退出码为 0。此处仍是存储和调度契约验证；实际下载器的文件写入、工作区真实路径/符号链接校验以及宿主集成仍待完成。
+
+### 实际下载器与落盘恢复增量
+
+候选新增 WorkspaceMediaDownloader，使用 @toonflow/file 写入真实文件；支持流式下载、大小/超时限制、SHA-256、不可覆盖发布和下载凭据恢复。验证包含中途断流、已有文件拒绝覆盖、目录越界及 Windows junction 拦截、大小限制，以及关闭/重开 SQLite 后在断网状态下采用已发布文件，生成提交次数保持 1。最新完整候选 QA 为 **36 项通过、0 失败、163 个断言**；全部源码和 QA 严格类型检查通过。
+
+边界：HTTP 响应仍为 Mock，尚未请求真实供应商；本地文件和 SQLite 恢复为实际执行。当前候选依赖通过 Windows junction 连接官方基线的文件包，Bun 本地包安装遇到 EPERM/FileNotFound，干净安装未验证。下载器要求支持 hard link 的文件系统，拒绝 HTTP 重定向，并要求宿主排除外部并发修改目录。目标 fork 集成、FFmpeg 实际合成、真实 API 正常生产和最终 A–Q 验收均未完成。真实模型调用和费用仍为 0。
+
+### 本地 FFmpeg 合成验证增量
+
+使用 Toonflow 内置安装器从其 GitHub 上游源下载并校验 FFmpeg/FFprobe 6.1.1，保存在 work/tools/ffmpeg。新增 FfmpegSynthesis，接入已有 SynthesisPort：验证输入哈希，保留片段原生音轨，叠加外部音轨与循环 BGM，烧录字幕，输出后以 ffprobe 验证格式，再以不可覆盖方式发布。
+
+实际导出 outputs/mockRenderProof.mp4：8 段色块、合成音、字幕，4 秒，1080×1920、H.264 yuv420p / AAC。又实际完成改字幕/BGM音量后的第二次导出；八个源片段哈希未变、生成提交次数保持 1。已抽帧检查字幕可见。最新完整候选 QA 37 项通过、183 个断言（含真实 FFmpeg 用例），严格 TypeScript 检查通过。真实模型调用/费用为 0。
+
+这是本地合成技术证据；人物、场景、参考图、真实对白/旁白、完整故事生产、自动质量检测、宿主集成、干净安装与最终 A–Q 验收仍未完成。
+
+### 自动技术质检增量
+
+新增 episodeQuality 并接入本地合成发布前流程：FFprobe 检查视频/音频流、1080×1920、H.264 yuv420p/AAC 与时长，FFmpeg blackdetect/silencedetect 扫描黑屏/静音区间；报告保存时间戳、阈值、格式问题、媒体路径与 SHA-256。规则命中标为 needs_review，不自动重做任何付费产物。正常技术样片报告保存为 outputs/mockRenderProof.quality.json，当前规则下 passed_rules。
+
+已实际生成黑屏静音、正常带音、缺失音轨和损坏文件作为故障素材；检测结果验证通过。最新完整候选 QA **38 项通过、0 失败、198 个断言**，严格 TypeScript 检查通过。范围限技术质量规则；对白正确性、口型、字幕对齐、剧情质量、完整故事与宿主集成均未据此验收。规则参考：https://ffmpeg.org/ffmpeg-filters.html#blackdetect_002c-blackdetect_005fvulkan 与 https://ffmpeg.org/ffmpeg-filters.html#silencedetect 。真实模型调用和费用仍为 0。
+
+### 合成落盘后中断恢复增量
+
+成片凭据增加规范化合成清单哈希；输出已存在时先核对清单、成片哈希和凭据，再直接认领，不调用 FFmpeg。新增仅允许非付费本地合成的重试入口；启动恢复标记后的本地合成可继续，付费请求仍禁止自动重提。
+
+实际 FFmpeg 发布 MP4 后，故障注入省略数据库完成登记并关闭/重开 SQLite；恢复时 FFmpeg 工厂调用为 0，八个原始视频生成任务提交次数仍为 1。改动清单、篡改文件、使用付费任务调用本地重试入口均被拒绝。全部 QA 分两批执行：28 + 11 = **39 项通过，216 个断言**；严格 TypeScript 检查通过。该证据覆盖发布后的恢复边界，尚不等于宿主进程强杀/重启完整验收。真实模型调用与费用仍为 0；完整故事、目标 fork 集成、UI、干净安装和备份恢复等剩余目标继续保持未完成。
+
+## 2026-11-06 fork 与阶段 1 进展
+
+- 用户授权并创建公开 fork https://github.com/luck158166-cmyk/Toonflow-app；本地 codex/production 分支基于其 master 提交 6086cdffceb704a632eca143dd16cd461a78cdac，upstream 指向 HBAI-Ltd/Toonflow-app。
+- 本地新 checkout 的 Bun 1.4.3 锁文件安装通过；x64 Bun 与 ARM64 Node 混用时曾缺少可选原生包，使用 --cpu '*' 补齐后，dev:plugins 构建通过。依赖初始化脚本已采用此参数。
+- 独立服务与 Vite 开发服务绑定 127.0.0.1；开发控制脚本在独立数据目录成功启动与停止，操作系统监听检查仅发现两个回环地址。浏览器显示首次配置及首页；工作区选择器曾卡住，尚未验证画布和 Agent。
+- 根目录 AGENTS.md 已根据用户 D2 同意添加 qa/ 例外。masterPlan.md 与用户提供原文 SHA-256 一致。
+- Windows 脚本目前包括初始化、环境检查、开发服务启动/停止与日志；备份恢复、完整桌面打包和完整原功能冒烟尚未完成。Electrobun 环境准备仍在进行中。
+- 旧的隔离生产候选尚未接入此 checkout，故不将其 QA 当作宿主集成结果。没有任何真实模型调用，费用 0 元。
+
+### Windows 基线后续验证
+
+- 在独立工作区 HUTCH_HOME 完成 Electrobun 2.0.5 prepare；其 Windows x64 发行工具链自行选择 Bun 1.4.4，与仓库开发环境锁定的 Bun 1.4.3 不同，运行时一致性与 SQLite 打包验证仍待做。
+- 补齐两种 CPU 架构依赖后，完整 `bun run typecheck`、`bun run dev:plugins` 和 `bun run build:desktop` 均退出码 0。后者生成 stable-win-x64 构建，并不代表已经完成安装、桌面启动或功能验收。
+- 已再次启动、确认同一数据目录的重复启动遭拒，并通过控制命令正常停止。工作区选择弹窗曾长时间无响应，已结束本次验证创建的选择器进程；画布与 Agent 仍待验证。
+
+## 生产底座接入进展（尚未通过阶段 2 验收）
+
+- 把先前隔离候选迁入 `packages/production/src`，建立工作区包并在根目录 `qa/` 保留已授权验证。QA 文件磁盘操作改走 `@toonflow/file`；文件包补齐同步符号链接原语。移入后 39 项通过、0 失败、216 个断言；生产包、文件包、QA 类型检查通过。
+- 宿主新增 `/api/production/importStory`，只允许原有本地工作区授权路径；隔离数据目录的实际 HTTP 导入返回项目 ID，随后只读 SQLite 查询核实标题、来源类型和中文原文。服务进程已停止，未调用模型。
+- 当前 API 只接入故事导入。预算、生成、恢复、下载、合成等核心模块已有包内实现和隔离验证，但仍未通过宿主入口连接与整集验收；跨项目全局预算和项目任务写入的跨库一致性仍需审查。

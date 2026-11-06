@@ -27,6 +27,8 @@ export const realpathSync = native.realpathSync;
 export const accessSync = native.accessSync;
 export const chmodSync = native.chmodSync;
 export const mkdtempSync = native.mkdtempSync;
+export const symlinkSync: typeof native.symlinkSync = (target, path, type) =>
+  withSyncFileAccess([path], "write", () => native.symlinkSync(target, path, type));
 
 export const readFile: typeof promises.readFile = ((path: native.PathLike | promises.FileHandle, options: any) =>
   typeof path === "object" && "fd" in path ? promises.readFile(path, options)

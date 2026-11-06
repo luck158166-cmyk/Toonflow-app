@@ -6,7 +6,7 @@
     "./browserCapabilities": "./src/lib/browserCapabilities.ts"
   },
   "scripts": {
-    "dev": "vite --host",
+    "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc"
