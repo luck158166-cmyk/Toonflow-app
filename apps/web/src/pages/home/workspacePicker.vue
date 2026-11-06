@@ -3,8 +3,12 @@
     <span class="directoryName">{{ selectedDirectory ? selectedDirectory.split(/[\\/]/).filter(Boolean).at(-1) || selectedDirectory : '工作目录' }}</span>
     <component :is="dialogVisible ? IconChevronUp : IconChevronDown" :size="14" aria-hidden="true" />
   </el-button>
-  <el-dialog v-model="dialogVisible" :title="!publicWeb && isLocalMobile ? '选择手机工作目录' : '选择服务器工作目录'" width="min(680px, 92vw)" appendToBody :closeOnClickModal="!editing" :closeOnPressEscape="!editing" :showClose="!editing" @close="finishSelection?.(null)">
+  <el-dialog v-model="dialogVisible" :title="manualInputEnabled ? '选择本机工作目录' : !publicWeb && isLocalMobile ? '选择手机工作目录' : '选择服务器工作目录'" width="min(680px, 92vw)" appendToBody :closeOnClickModal="!editing" :closeOnPressEscape="!editing" :showClose="!editing" @close="finishSelection?.(null)">
     <div class="workspaceBrowser">
+      <div v-if="manualInputEnabled" class="manualDirectory">
+        <el-input v-model="manualDirectory" placeholder="输入本机文件夹的完整路径" :disabled="manualChecking" @keyup.enter="confirmManualDirectory" />
+        <el-button :loading="manualChecking" :disabled="!manualDirectory.trim() || editing" @click="confirmManualDirectory">使用此路径</el-button>
+      </div>
       <div class="directoryHeader">
         <el-button :icon="IconArrowLeft" circle :disabled="loading || editing || !listing?.path" aria-label="上一级目录" @click="loadDirectory(listing?.parent ?? '')" />
         <el-text class="directoryPath" truncated :title="listing?.absolutePath">{{ !publicWeb && isLocalMobile ? '手机工作区' : '服务器工作区' }}{{ listing?.path ? ` / ${listing.path}` : '' }}</el-text>
@@ -57,6 +61,9 @@ const dialogVisible = ref(false);
 const selecting = ref(false);
 const loading = ref(false);
 const editing = ref(false);
+const manualInputEnabled = ref(false);
+const manualDirectory = ref("");
+const manualChecking = ref(false);
 const listing = ref<DirectoryListing>();
 const browseError = ref("");
 let finishSelection: ((directory: string | null) => void) | undefined;
@@ -73,11 +80,13 @@ async function chooseDirectory(): Promise<string | null> {
       return data.data.directory;
     }
     if (!publicWeb.value) {
-      const { data } = await axios.post<{ code: number; data: { native: boolean; directory: string | null } }>("/api/workspaces/selectDirectory", null, { headers: { "x-toonflow-workspace": "1" } });
+      const { data } = await axios.post<{ code: number; data: { native: boolean; manual: boolean; directory: string | null } }>("/api/workspaces/selectDirectory", null, { headers: { "x-toonflow-workspace": "1" } });
       if (data.data.native) {
         if (data.data.directory) selectedDirectory.value = data.data.directory;
         return data.data.directory;
       }
+      manualInputEnabled.value = data.data.manual;
+      manualDirectory.value = selectedDirectory.value;
     }
     dialogVisible.value = true;
     void loadDirectory("");
@@ -87,6 +96,23 @@ async function chooseDirectory(): Promise<string | null> {
     return null;
   }
   finally { selecting.value = false; finishSelection = undefined; }
+}
+
+async function confirmManualDirectory() {
+  if (!manualInputEnabled.value || manualChecking.value || !manualDirectory.value.trim()) return;
+  manualChecking.value = true;
+  try {
+    const { data } = await axios.get<{ code: number; data: { directory: string }; message: string }>("/api/workspaces/check", {
+      params: { directory: manualDirectory.value.trim() }, headers: { "x-toonflow-workspace": "1" },
+    });
+    if (data.code !== 200) throw new Error(data.message);
+    selectedDirectory.value = data.data.directory;
+    finishSelection?.(data.data.directory);
+    dialogVisible.value = false;
+  } catch (error) {
+    ElMessage.error(axios.isAxiosError<{ message?: string }>(error)
+      ? error.response?.data?.message || "无法使用此文件夹，请检查完整路径" : error instanceof Error ? error.message : "无法使用此文件夹，请检查完整路径");
+  } finally { manualChecking.value = false; }
 }
 
 async function loadDirectory(path: string) {
@@ -164,6 +190,8 @@ function confirmDirectory() {
   display: flex;
   flex-direction: column;
   gap: 12px;
+
+  .manualDirectory { display: flex; gap: 8px; }
 
   .directoryHeader {
     display: flex;
