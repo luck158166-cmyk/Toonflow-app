@@ -10,6 +10,9 @@
             <icon-settings :size="18" aria-hidden="true" />
           </el-badge>
         </el-button>
+        <el-button class="toolButton" text aria-label="短剧生产" title="短剧生产" @click="emit('openProduction')">
+          <icon-movie :size="18" aria-hidden="true" />
+        </el-button>
       </div>
     </el-card>
     <el-dialog v-model="exitVisible" title="退出项目" width="360px" alignCenter appendToBody>
@@ -25,10 +28,10 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useRouter } from "vue-router";
-import { IconLogout, IconSettings } from "@tabler/icons-vue";
+import { IconLogout, IconSettings, IconMovie } from "@tabler/icons-vue";
 import { hasDesktopUpdate } from "@/stores/desktopUpdate";
 
-const emit = defineEmits<{ openSettings: [] }>();
+const emit = defineEmits<{ openSettings: []; openProduction: [] }>();
 const router = useRouter();
 const exitVisible = ref(false);
 const leaving = ref(false);

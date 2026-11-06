@@ -163,6 +163,20 @@ export class ProductionCatalog {
     return id;
   }
 
+  listStories() {
+    return this.db.query(`SELECT id, title, source_kind AS sourceKind, workflow_state AS workflowState,
+      created_at AS createdAt, updated_at AS updatedAt FROM production_project ORDER BY created_at DESC, id DESC`)
+      .all() as Array<{ id: string; title: string; sourceKind: SourceKind; workflowState: string; createdAt: number; updatedAt: number }>;
+  }
+
+  getStory(projectId: string) {
+    return this.db.query(`SELECT id, title, source_kind AS sourceKind, source_text AS sourceText,
+      workflow_state AS workflowState, created_at AS createdAt, updated_at AS updatedAt
+      FROM production_project WHERE id = ?`).get(projectId) as
+      | { id: string; title: string; sourceKind: SourceKind; sourceText: string; workflowState: string; createdAt: number; updatedAt: number }
+      | null;
+  }
+
   saveStoryAnalysis(projectId: string, analysis: { events: unknown[]; relations: unknown[] }, version: number) {
     if (!Number.isSafeInteger(version) || version < 1) throw new RangeError("Analysis version must be positive.");
     if (!Array.isArray(analysis.events) || !Array.isArray(analysis.relations)) throw new TypeError("Events and relations must be arrays.");

@@ -10,13 +10,13 @@ export default router.post("/", validateFields({
   directory: z.string().min(1),
   title: z.string().trim().min(1).max(200),
   sourceKind: z.enum(["synopsis", "novel", "script"]),
-  sourceText: z.string().trim().min(1).max(1_000_000),
+  sourceText: z.string().min(1).max(1_000_000).refine(text => text.trim().length > 0),
 }), async (req, res) => {
   u.mcpControl.assertAppRequest(req);
   const directory = await u.workspace.resolveWorkspace(req, req.body.directory);
   const { title, sourceKind, sourceText } = req.body;
   const projectId = await u.production.withProduction(directory, catalog => catalog.importStory({
-    title: title.trim(), sourceKind, sourceText: sourceText.trim(),
+    title: title.trim(), sourceKind, sourceText,
   }));
   res.status(201).json(success({ projectId }));
 });

@@ -4,6 +4,20 @@ import { applyEpisodeDraft, ProductionCatalog, type EpisodeDraft } from "../pack
 import { ProductionStore } from "../packages/production/src/store";
 
 describe("structured production catalog", () => {
+  it("lists story metadata without leaking source text and reads only the selected story", () => {
+    const db = new Database(":memory:");
+    const catalog = new ProductionCatalog(db);
+    const firstId = catalog.importStory({ title: "第一部", sourceKind: "novel", sourceText: "只属于第一部的原文" });
+    const secondId = catalog.importStory({ title: "第二部", sourceKind: "script", sourceText: "只属于第二部的原文" });
+    const list = catalog.listStories();
+    expect(list.map(story => story.id).sort()).toEqual([firstId, secondId].sort());
+    expect(list.every(story => !("sourceText" in story))).toBe(true);
+    expect(catalog.getStory(firstId)?.sourceText).toBe("只属于第一部的原文");
+    expect(catalog.getStory(secondId)?.sourceText).toBe("只属于第二部的原文");
+    expect(catalog.getStory("missing")).toBeNull();
+    db.close();
+  });
+
   it("imports a story and prepares an eight-shot episode with characters, scenes, evidence and separated states", () => {
     const db = new Database(":memory:");
     new ProductionStore(db);
