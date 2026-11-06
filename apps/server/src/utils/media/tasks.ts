@@ -13,6 +13,7 @@ import { generateMedia, isMediaNotSubmitted, type MediaGenerationCheckpoint } fr
 import { lockWorkspaceFiles, resolveWorkspacePath } from "@/utils/workspace/files";
 import { modelGateway } from "@/utils/multiTenant/gateway";
 import { readPriceReference } from "@/utils/media/priceReference";
+import { assertProductionGenerationGate } from "@/utils/production/generationGate";
 
 const maxRecordSize = 16 * 1024 * 1024;
 const maxBlobSize = 140 * 1024 * 1024;
@@ -477,6 +478,7 @@ export async function start(cwd: string, taskId: string, mediaType: "image" | "v
       return snapshot(current, owner);
     }
     if (activeCount >= 1000) invalid("生成任务过多，请稍后重试", 429);
+    await assertProductionGenerationGate(cwd);
     const modelRouteCipher = modelGateway.enabled()
       ? await modelGateway.capture(mediaType, parsed.providerId, parsed.modelId, parsed) : undefined;
     if (owner?.role === "user" && !modelRouteCipher) invalid("多租户模型路由尚未开启", 403);

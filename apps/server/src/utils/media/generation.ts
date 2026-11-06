@@ -11,6 +11,7 @@ import { lockWorkspaceFiles, resolveWorkspacePath, writeWorkspaceFile } from "@/
 import { beginGeneration, getProviderPrice } from "@/utils/media/billing";
 import { detectMimeType, readPriceReference } from "@/utils/media/priceReference";
 import { modelGateway } from "@/utils/multiTenant/gateway";
+import { assertProductionGenerationGate } from "@/utils/production/generationGate";
 
 const maxMediaSize = 100 * 1024 * 1024;
 export type MediaGenerationCheckpoint = {
@@ -248,6 +249,7 @@ export async function generateMedia(
   task?: MediaGenerationTask,
 ): Promise<GeneratedMedia[]> {
   requireGenerationMode(task);
+  if (!task?.resume) await assertProductionGenerationGate(cwd);
   const checkpoint = task?.checkpoint;
   let submitted = task?.resume === true || !!checkpoint?.providerData || checkpoint?.assetCount !== undefined || !!checkpoint?.files?.length;
   try {
