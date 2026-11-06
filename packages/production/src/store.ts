@@ -320,33 +320,43 @@ export class ProductionStore {
   }
 
   createTask(input: TaskInput): CreateTaskResult {
+    return this.atomic(() => this.createTaskInTransaction(input));
+  }
+
+  /** Create a new paid task, reserve its budget, and persist dispatch intent in one transaction. */
+  createTaskAndBeginSubmission(input: TaskInput): DispatchResult {
+    return this.atomic(() => {
+      const created = this.createTaskInTransaction(input);
+      return this.beginSubmissionInTransaction(created.task.id);
+    });
+  }
+
+  private createTaskInTransaction(input: TaskInput): CreateTaskResult {
     const currency = input.currency.toUpperCase();
     assertMoney(input.estimatedCostMicros, currency);
     if (!input.idempotencyKey.trim() || !input.projectId.trim() || !input.episodeId.trim() || !input.provider.trim()) {
       throw new TypeError("Task identity, project, episode, and provider are required.");
     }
     const normalized = { ...input, currency, modelId: input.modelId?.trim() ?? "" };
-    return this.atomic(() => {
-      const old = this.db.query(`SELECT ${taskColumns} FROM generation_task WHERE idempotency_key = ?`)
-        .get(normalized.idempotencyKey) as TaskRow | null;
-      if (old) {
-        const same = old.project_id === normalized.projectId && old.episode_id === normalized.episodeId
-          && old.shot_id === (normalized.shotId ?? null) && old.stage === normalized.stage
-          && old.provider === normalized.provider && old.model_id === normalized.modelId && old.request_json === normalized.requestJson
-          && old.estimated_cost_micros === normalized.estimatedCostMicros && old.currency === normalized.currency
-          && (old.billable === 1) === normalized.billable && old.redone_from_task_id === (normalized.redoneFromTaskId ?? null);
-        if (!same) throw new Error("Idempotency key reused for a different request.");
-        return { task: toTask(old), created: false };
-      }
-      const id = randomUUID();
-      const now = Date.now();
-      this.db.query(`INSERT INTO generation_task (${taskColumns}, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', NULL, 0, 0, ?, ?)`)
-        .run(id, normalized.idempotencyKey, normalized.projectId, normalized.episodeId, normalized.shotId ?? null,
-          normalized.stage, normalized.provider, normalized.modelId, normalized.requestJson, normalized.estimatedCostMicros,
-          normalized.currency, normalized.billable ? 1 : 0, normalized.redoneFromTaskId ?? null, now, now);
-      return { task: this.getTask(id), created: true };
-    });
+    const old = this.db.query(`SELECT ${taskColumns} FROM generation_task WHERE idempotency_key = ?`)
+      .get(normalized.idempotencyKey) as TaskRow | null;
+    if (old) {
+      const same = old.project_id === normalized.projectId && old.episode_id === normalized.episodeId
+        && old.shot_id === (normalized.shotId ?? null) && old.stage === normalized.stage
+        && old.provider === normalized.provider && old.model_id === normalized.modelId && old.request_json === normalized.requestJson
+        && old.estimated_cost_micros === normalized.estimatedCostMicros && old.currency === normalized.currency
+        && (old.billable === 1) === normalized.billable && old.redone_from_task_id === (normalized.redoneFromTaskId ?? null);
+      if (!same) throw new Error("Idempotency key reused for a different request.");
+      return { task: toTask(old), created: false };
+    }
+    const id = randomUUID();
+    const now = Date.now();
+    this.db.query(`INSERT INTO generation_task (${taskColumns}, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', NULL, 0, 0, ?, ?)`)
+      .run(id, normalized.idempotencyKey, normalized.projectId, normalized.episodeId, normalized.shotId ?? null,
+        normalized.stage, normalized.provider, normalized.modelId, normalized.requestJson, normalized.estimatedCostMicros,
+        normalized.currency, normalized.billable ? 1 : 0, normalized.redoneFromTaskId ?? null, now, now);
+    return { task: this.getTask(id), created: true };
   }
 
   createRedoTask(originalTaskId: string, idempotencyKey: string, requestJson: string, estimatedCostMicros: number): CreateTaskResult {
@@ -666,45 +676,47 @@ export class ProductionStore {
 
   /** Persist dispatch intent before network I/O. A crash after this point must reconcile, never blindly resubmit. */
   beginSubmission(id: string): DispatchResult {
-    return this.atomic(() => {
-      const task = this.getTask(id);
-      if (task.state === "succeeded") return { status: "already_succeeded" as const, task };
-      if (task.state !== "queued" || task.requestStarted) return { status: "already_dispatched" as const, task };
+    return this.atomic(() => this.beginSubmissionInTransaction(id));
+  }
 
-      let episodeWarning = false;
-      if (task.billable) {
-        const episodeUsage = this.usageFor({ type: "episode", key: episodeBudgetKey(task.projectId, task.episodeId) }, task.currency);
-        if (episodeUsage.configured && (episodeUsage.usedMicros >= episodeUsage.limitMicros
-          || task.estimatedCostMicros > episodeUsage.limitMicros - episodeUsage.usedMicros)) {
-          return { status: "budget_exhausted" as const, task,
-            usedMicros: episodeUsage.usedMicros, limitMicros: episodeUsage.limitMicros };
-        }
-        episodeWarning = episodeUsage.configured &&
-          BigInt(episodeUsage.usedMicros + task.estimatedCostMicros) * 10000n >=
-          BigInt(episodeUsage.limitMicros) * BigInt(episodeUsage.warningBasisPoints);
-      }
+  private beginSubmissionInTransaction(id: string): DispatchResult {
+    const task = this.getTask(id);
+    if (task.state === "succeeded") return { status: "already_succeeded" as const, task };
+    if (task.state !== "queued" || task.requestStarted) return { status: "already_dispatched" as const, task };
 
-      const reservation = task.billable ? this.globalBudgets.reserve(task) : null;
-      if (reservation && !reservation.allowed) {
+    let episodeWarning = false;
+    if (task.billable) {
+      const episodeUsage = this.usageFor({ type: "episode", key: episodeBudgetKey(task.projectId, task.episodeId) }, task.currency);
+      if (episodeUsage.configured && (episodeUsage.usedMicros >= episodeUsage.limitMicros
+        || task.estimatedCostMicros > episodeUsage.limitMicros - episodeUsage.usedMicros)) {
         return { status: "budget_exhausted" as const, task,
-          usedMicros: reservation.exceeded.usedMicros, limitMicros: reservation.exceeded.limitMicros };
+          usedMicros: episodeUsage.usedMicros, limitMicros: episodeUsage.limitMicros };
       }
-      const now = Date.now();
-      if (task.billable) {
-        this.db.query(`INSERT INTO task_reservation(task_id, amount_micros, currency, state, updated_at)
-          VALUES (?, ?, ?, 'active', ?)`).run(id, task.estimatedCostMicros, task.currency, now);
-      }
-      this.db.query(`UPDATE generation_task SET state = 'dispatching', request_started = 1,
-        attempt = attempt + 1, updated_at = ? WHERE id = ? AND state = 'queued' AND request_started = 0`)
-        .run(now, id);
-      const updated = this.getTask(id);
-      const reservedMicros = task.billable ? task.estimatedCostMicros : 0;
-      const usedAfterReserveMicros = reservation?.allowed
-        ? reservation.usedAfterReserveMicros : this.getBudgetUsage().usedMicros;
-      return reservation?.warning || episodeWarning
-        ? { status: "warning_90" as const, task: updated, reservedMicros, usedAfterReserveMicros }
-        : { status: "started" as const, task: updated, reservedMicros, usedAfterReserveMicros };
-    });
+      episodeWarning = episodeUsage.configured &&
+        BigInt(episodeUsage.usedMicros + task.estimatedCostMicros) * 10000n >=
+        BigInt(episodeUsage.limitMicros) * BigInt(episodeUsage.warningBasisPoints);
+    }
+
+    const reservation = task.billable ? this.globalBudgets.reserve(task) : null;
+    if (reservation && !reservation.allowed) {
+      return { status: "budget_exhausted" as const, task,
+        usedMicros: reservation.exceeded.usedMicros, limitMicros: reservation.exceeded.limitMicros };
+    }
+    const now = Date.now();
+    if (task.billable) {
+      this.db.query(`INSERT INTO task_reservation(task_id, amount_micros, currency, state, updated_at)
+        VALUES (?, ?, ?, 'active', ?)`).run(id, task.estimatedCostMicros, task.currency, now);
+    }
+    this.db.query(`UPDATE generation_task SET state = 'dispatching', request_started = 1,
+      attempt = attempt + 1, updated_at = ? WHERE id = ? AND state = 'queued' AND request_started = 0`)
+      .run(now, id);
+    const updated = this.getTask(id);
+    const reservedMicros = task.billable ? task.estimatedCostMicros : 0;
+    const usedAfterReserveMicros = reservation?.allowed
+      ? reservation.usedAfterReserveMicros : this.getBudgetUsage().usedMicros;
+    return reservation?.warning || episodeWarning
+      ? { status: "warning_90" as const, task: updated, reservedMicros, usedAfterReserveMicros }
+      : { status: "started" as const, task: updated, reservedMicros, usedAfterReserveMicros };
   }
 
   registerProviderTask(id: string, providerTaskId: string) {

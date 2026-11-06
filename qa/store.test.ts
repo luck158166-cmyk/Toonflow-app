@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "@toonflow/file";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { episodeBudgetKey, ProductionStore, type TaskInput } from "../packages/production/src/store";
-import { dispatchTask, type ProviderSubmissionPort } from "../packages/production/src/dispatcher";
+import { dispatchNewTask, dispatchTask, type ProviderSubmissionPort } from "../packages/production/src/dispatcher";
 import { createTaskAfterPromptCheck } from "../packages/production/src/promptPolicy";
 import { processPendingMediaDownloads, type MediaDownloadPort } from "../packages/production/src/mediaDownloadWorker";
 import { runSynthesisTask, type SynthesisPort } from "../packages/production/src/synthesisWorker";
@@ -98,6 +98,27 @@ describe("production task safety", () => {
     db.close();
   });
 
+  it("creates and dispatches a new paid task once with its reservation in the same transaction", async () => {
+    const { db, store } = fixture();
+    try {
+      let calls = 0;
+      const provider: ProviderSubmissionPort = {
+        providerId: "mock-ark",
+        async submit() { calls++; return { providerTaskId: "new-paid-provider-task" }; },
+      };
+      const input = paidInput("new-paid-once", 100_000);
+      const first = await dispatchNewTask(store, input, provider);
+      const duplicate = await dispatchNewTask(store, input, provider);
+      expect(first.status).toBe("accepted");
+      expect(duplicate.status).toBe("already_dispatched");
+      expect(calls).toBe(1);
+      expect(db.query("SELECT COUNT(*) AS count FROM generation_task").get()).toEqual({ count: 1 });
+      expect(db.query("SELECT COUNT(*) AS count FROM global_task_reservation WHERE state = 'active'").get())
+        .toEqual({ count: 1 });
+      expect(store.getBudgetUsage("CNY").reservedMicros).toBe(100_000);
+    } finally { db.close(); }
+  });
+
   it("blocks a prompt locally before task creation, reservation, or provider submission", () => {
     const { db, store } = fixture();
     let providerCalls = 0;
@@ -164,6 +185,31 @@ describe("production task safety", () => {
       expect(store.getTask(task.id)).toMatchObject({ state: "queued", attempt: 0, requestStarted: false });
       expect(db.query("SELECT COUNT(*) AS count FROM global_task_reservation").get()).toEqual({ count: 0 });
       expect(store.getBudgetUsage("CNY").reservedMicros).toBe(0);
+    } finally { db.close(); }
+  });
+
+  it("rolls back new task creation and global reservation together after a local write fault", () => {
+    const { db, store } = fixture();
+    try {
+      db.exec(`CREATE TRIGGER reject_new_reservation BEFORE INSERT ON task_reservation
+        BEGIN SELECT RAISE(ABORT, 'injected new task write failure'); END`);
+      expect(() => store.createTaskAndBeginSubmission(paidInput("atomic-new-task", 50_000)))
+        .toThrow("injected new task write failure");
+      expect(db.query("SELECT COUNT(*) AS count FROM generation_task").get()).toEqual({ count: 0 });
+      expect(db.query("SELECT COUNT(*) AS count FROM global_task_reservation").get()).toEqual({ count: 0 });
+    } finally { db.close(); }
+  });
+
+  it("applies warning and hard budget limits before a new paid request can submit", () => {
+    const { db, store } = fixture();
+    try {
+      store.setBudget(100_000, "CNY");
+      const warning = store.createTaskAndBeginSubmission(paidInput("new-task-90-percent", 90_000));
+      expect(warning.status).toBe("warning_90");
+      const blocked = store.createTaskAndBeginSubmission(paidInput("new-task-over-budget", 10_001));
+      expect(blocked.status).toBe("budget_exhausted");
+      expect(blocked.task).toMatchObject({ state: "queued", requestStarted: false, attempt: 0 });
+      expect(store.getBudgetUsage("CNY").reservedMicros).toBe(90_000);
     } finally { db.close(); }
   });
 
