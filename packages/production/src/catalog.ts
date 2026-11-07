@@ -167,11 +167,20 @@ export class ProductionCatalog {
         UNIQUE(project_id, id)
       );
       CREATE INDEX IF NOT EXISTS shot_prop_link_prop ON shot_prop_link(prop_id);
+      CREATE TABLE IF NOT EXISTS adaptation_adoption (
+        task_id TEXT PRIMARY KEY,
+        input_id TEXT NOT NULL REFERENCES adaptation_input(id),
+        response_hash TEXT NOT NULL,
+        episode_id TEXT NOT NULL UNIQUE REFERENCES production_episode(id),
+        created_at INTEGER NOT NULL
+      );
       CREATE INDEX IF NOT EXISTS extracted_candidate_state ON extracted_candidate(project_id, state, kind);
     `);
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (3, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (4, ?) ON CONFLICT(version) DO NOTHING`)
+      .run(Date.now());
+    db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (5, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
   }
 
@@ -296,6 +305,8 @@ export class ProductionCatalog {
         stateBefore: string; stateAfter: string; interaction: string; evidenceJson: string }>;
     return {
       chapterIndex,
+      adaptationAdoptions: this.db.query(`SELECT a.task_id AS taskId, a.episode_id AS episodeId FROM adaptation_adoption a
+        JOIN production_episode e ON e.id = a.episode_id WHERE e.project_id = ?`).all(projectId) as Array<{ taskId: string; episodeId: string }>,
       adaptationInputs: this.db.query(`SELECT id, episode_number AS episodeNumber, source_hash AS sourceHash,
         template_version AS templateVersion, created_at AS createdAt FROM adaptation_input
         WHERE project_id = ? ORDER BY created_at DESC, id`).all(projectId) as Array<{
@@ -575,7 +586,8 @@ export class ProductionCatalog {
 }
 
 /** Persist a validated Jellyfish-style structured draft atomically; this function never calls a model. */
-export function applyEpisodeDraft(catalog: ProductionCatalog, projectId: string, draft: EpisodeDraft) {
+export function applyEpisodeDraft(catalog: ProductionCatalog, projectId: string, draft: EpisodeDraft,
+  origin?: { taskId: string; inputId: string; responseHash: string; validateCurrentInput: () => void }) {
   if (!projectId.trim() || !Number.isSafeInteger(draft.episodeNumber) || draft.episodeNumber < 1
     || !draft.title.trim() || !draft.logline.trim() || !draft.outline.length || !draft.script.length) {
     throw new TypeError("Episode draft is missing its identity, outline, or script.");
@@ -686,6 +698,7 @@ export function applyEpisodeDraft(catalog: ProductionCatalog, projectId: string,
   }
 
   return catalog.withTransaction(() => {
+    origin?.validateCurrentInput();
     const sceneIds = new Map<string, string>();
     for (const scene of draft.scenes) {
       const existing = catalog.db.query(`SELECT id, locked, location, atmosphere, time_weather AS timeWeather
@@ -749,6 +762,8 @@ export function applyEpisodeDraft(catalog: ProductionCatalog, projectId: string,
           text: line.text, emotion: line.emotion, voiceProfile: line.voiceProfile });
       }
     }
+    if (origin) catalog.db.query(`INSERT INTO adaptation_adoption(task_id, input_id, response_hash, episode_id, created_at)
+      VALUES (?, ?, ?, ?, ?)`).run(origin.taskId, origin.inputId, origin.responseHash, episodeId, Date.now());
     return { episodeId, shotIds, characterIds: [...characterIds.values()], sceneIds: [...sceneIds.values()],
       propIds: [...propIds.values()], awaitingReview: true };
   });

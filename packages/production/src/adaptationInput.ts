@@ -6,7 +6,7 @@ export type AdaptationOptions = { episodeNumber: number; firstChapter: number; l
   targetSeconds: number; genre: string; visualStyle: string };
 
 /** Saves a complete, immutable model input. No network calls and no silent source truncation. */
-export function prepareAdaptationInput(catalog: ProductionCatalog, projectId: string,
+export function buildAdaptationInput(catalog: ProductionCatalog, projectId: string,
   options: AdaptationOptions, responseSchema: unknown) {
   for (const value of [options.episodeNumber, options.firstChapter, options.lastChapter, options.targetSeconds]) {
     if (!Number.isSafeInteger(value) || value < 1) throw new Error("集号、章节和时长必须为正整数");
@@ -51,10 +51,16 @@ export function prepareAdaptationInput(catalog: ProductionCatalog, projectId: st
   const requestJson = JSON.stringify(request);
   if (requestJson.length > 120000) throw new Error("编剧上下文超过当前 12 万字符上限，请缩小章节范围；原文没有被截断");
   const id = createHash("sha256").update(requestJson).digest("hex");
+  return { id, episodeNumber: options.episodeNumber, sourceHash: index.sourceHash, templateVersion, requestJson };
+}
+
+export function prepareAdaptationInput(catalog: ProductionCatalog, projectId: string,
+  options: AdaptationOptions, responseSchema: unknown) {
+  const { id, sourceHash, templateVersion, requestJson } = buildAdaptationInput(catalog, projectId, options, responseSchema);
   const createdAt = Date.now();
   catalog.db.query(`INSERT INTO adaptation_input(id, project_id, episode_number, source_hash,
     template_version, request_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`)
-    .run(id, projectId, options.episodeNumber, index.sourceHash, templateVersion, requestJson, createdAt);
+    .run(id, projectId, options.episodeNumber, sourceHash, templateVersion, requestJson, createdAt);
   return catalog.db.query(`SELECT id, episode_number AS episodeNumber, source_hash AS sourceHash,
     template_version AS templateVersion, request_json AS requestJson, created_at AS createdAt
     FROM adaptation_input WHERE id = ? AND project_id = ?`).get(id, projectId) as {
