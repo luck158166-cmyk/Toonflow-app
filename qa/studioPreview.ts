@@ -2,7 +2,12 @@ import { createApp, h } from "../apps/web/node_modules/vue/dist/vue.esm-bundler.
 import productionApi, { type EpisodeReview } from "../apps/web/src/lib/productionApi";
 import "../apps/web/node_modules/element-plus/dist/index.css";
 import dashboard from "../apps/web/src/pages/production/dashboard.vue";
-if (new URLSearchParams(location.search).get("stage") === "review") {
+if (new URLSearchParams(location.search).get("stage") === "references") {
+  document.querySelector("#notice")!.textContent = "参考图库验证 · 临时工作区真实读写 · 无模型调用";
+  const fixture = await (await fetch("/qa/referenceFixture")).json();
+  const { default: assetReferencePanel } = await import("../apps/web/src/pages/production/assetReferencePanel.vue");
+  createApp({ render: () => h(assetReferencePanel, fixture) }).mount("#app");
+} else if (new URLSearchParams(location.search).get("stage") === "review") {
   document.querySelector("#notice")!.textContent = "审核界面验证 · 页面内模拟，不写生产数据";
   const evidence = [{ sourceHash: "a".repeat(64), chapterSequence: 1, lineStart: 2, lineEnd: 2, quote: "林岚走进车站，拾起铜钥匙。" }];
   const fixture: EpisodeReview = { snapshotHash: "b".repeat(64), sourceText: "第一章 雨夜\n林岚走进车站，拾起铜钥匙。", issues: [], hasSuccessor: false, history: [],

@@ -187,6 +187,25 @@ export class ProductionCatalog {
         created_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS episode_review_history ON episode_review(episode_id, created_at);
+      CREATE TABLE IF NOT EXISTS asset_reference (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES production_project(id),
+        entity_kind TEXT NOT NULL CHECK (entity_kind IN ('asset','scene')),
+        entity_id TEXT NOT NULL,
+        entity_hash TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('headshot','fullBody','scene','prop','costume')),
+        version INTEGER NOT NULL CHECK (version > 0),
+        previous_id TEXT REFERENCES asset_reference(id),
+        path TEXT NOT NULL,
+        sha256 TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        width INTEGER NOT NULL,
+        height INTEGER NOT NULL,
+        source_note TEXT NOT NULL,
+        source_kind TEXT NOT NULL CHECK (source_kind IN ('user_authorized')),
+        created_at INTEGER NOT NULL,
+        UNIQUE(project_id, entity_kind, entity_id, role, version)
+      );
     `);
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (3, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
@@ -195,6 +214,8 @@ export class ProductionCatalog {
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (5, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (6, ?) ON CONFLICT(version) DO NOTHING`)
+      .run(Date.now());
+    db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (7, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
   }
 

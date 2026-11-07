@@ -5,7 +5,7 @@
       <nav aria-label="主导航">
         <button class="active" type="button"><icon-layout-grid :size="18" />项目列表</button>
         <button type="button" :disabled="!workspaceStore.project" @click="openProject(workspaceStore.project!)"><icon-movie :size="18" />制作工作台</button>
-        <button type="button" @click="router.push('/classic-home')"><icon-brush :size="18" />画布创作</button>
+        <studioSettings />
       </nav>
       <p class="railNote">本地工作区 · 生产资料保存在你的电脑上</p>
     </aside>
@@ -59,13 +59,14 @@
 <script setup lang="ts">
 import axios from "axios";
 import { ElMessage } from "element-plus";
-import { IconBrush, IconLayoutGrid, IconMovie } from "@tabler/icons-vue";
+import { IconLayoutGrid, IconMovie } from "@tabler/icons-vue";
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import productionApi, { type StorySummary } from "@/lib/productionApi";
 import { useWorkspaceStore, type Project } from "@/stores/workspace";
 import workspacePicker from "@/pages/home/workspacePicker.vue";
+import studioSettings from "./studioSettings.vue";
 
 type ProjectCard = { workspace: Project; story: StorySummary | null };
 const router = useRouter();

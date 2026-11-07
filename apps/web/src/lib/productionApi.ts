@@ -5,6 +5,13 @@ export type AdaptationPreview = { planHash: string; estimatedCostMicros: number;
   quantity: number; requestJson: string; options: { episodeNumber: number; firstChapter: number; lastChapter: number;
     targetSeconds: number; genre: string; visualStyle: string } };
 export type ProductionTextModel = { providerId: string; providerLabel: string; modelId: string; label: string; maxOutputTokens: number };
+export type ReferenceRole = "headshot" | "fullBody" | "scene" | "prop" | "costume";
+export type AssetReference = { id: string; projectId: string; entityKind: "asset" | "scene"; entityId: string;
+  entityHash: string; role: ReferenceRole; version: number; previousId: string | null; path: string;
+  sha256: string; mimeType: string; width: number; height: number; sourceNote: string;
+  sourceKind: "user_authorized"; createdAt: number };
+export type ReferenceTarget = { entityKind: "asset" | "scene"; entityId: string; name: string; kind: string;
+  description: string; locked: boolean; entityHash: string; roles: ReferenceRole[] };
 
 export type SourceKind = "synopsis" | "novel" | "script";
 export type Story = { id: string; title: string; sourceKind: SourceKind; workflowState: string; createdAt: number; updatedAt: number };
@@ -21,6 +28,7 @@ export type EpisodeCost = { episode: Episode; breakdown: Array<{ shotId: string 
     pricingRef: string | null; unit: string | null; units: number | null; unitPriceMicros: number | null;
     createdAt: number }> };
 export type ProjectProduction = { story: StoryDetail;
+  assetReferences: AssetReference[];
   adaptationAdoptions: Array<{ taskId: string; episodeId: string }>;
   adaptationInputs: AdaptationInputSummary[];
   chapterIndex: { sourceHash: string; lineCount: number; chapterUnit: "章" | "回" | "节" | null;
@@ -71,6 +79,20 @@ export type BudgetOverview = { global: BudgetUsage; globalHistory: BudgetChange[
 const client = axios.create({ baseURL: "/api/production", headers: { "x-toonflow-workspace": "1" } });
 
 const productionApi = {
+  async getAssetReferences(directory: string, projectId: string) {
+    const { data } = await client.get<{ data: { targets: ReferenceTarget[]; references: AssetReference[] } }>("/getAssetReferences", { params: { directory, projectId } });
+    return data.data;
+  },
+  async bindAssetReference(directory: string, input: { projectId: string; entityKind: "asset" | "scene"; entityId: string;
+    entityHash: string; role: ReferenceRole; expectedReferenceId: string | null; rightsConfirmed: true;
+    sourceNote: string; path: string; sha256: string }) {
+    const { data } = await client.post<{ data: { reference: AssetReference; created: boolean } }>("/bindAssetReference", { directory, ...input });
+    return data.data;
+  },
+  async readAssetReference(directory: string, projectId: string, referenceId: string) {
+    const { data } = await client.get<Blob>("/readAssetReference", { params: { directory, projectId, referenceId }, responseType: "blob" });
+    return data;
+  },
   async getEpisodeReview(directory: string, projectId: string, episodeId: string) {
     const { data } = await client.get<{ data: EpisodeReview }>("/getEpisodeReview", { params: { directory, projectId, episodeId } });
     return data.data;

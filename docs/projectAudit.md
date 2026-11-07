@@ -206,6 +206,8 @@ D:\Temp\claude\c88343a087018856\af42c4a0-6e61-4a5e-b5c2-5bcd9772db65\scratchpad\
 
 ## 十、目标 fork 与基线修订（2026-11-06）
 
+实际整合更新（2026-11-07）：生产首页和工作台直接复用 `apps/web/src/components/settings/index.vue` 的模型设置与权限过滤，生产页不再依赖跳转旧首页配置模型。生产接口复用 `utils/workspace/files.ts` 的路径边界与写锁、`useWorkspaceFiles` 的前端读写入口；新增原图绑定仅对生产资料建表，未修改旧画布资产。读取原图使用哈希验证而不持有排他写锁，支持多个缩略图并发读取；新保存仍使用排他写锁及只新建写入。原路由注册通过生成器更新。详细实现与验证见路线图“资产原图与版本接入”。
+
 用户创建的 fork 为 luck158166-cmyk/Toonflow-app，本地基线与 origin/master 均为 6086cdffceb704a632eca143dd16cd461a78cdac。上面的历史记录保留当时事实；本机已通过工作区 Bun 1.4.3 运行 SQLite，FFmpeg 已在隔离工具目录验证，用户选择暂不安装 sd25-pe。独立服务的监听修改、Vite 开发监听修改、顶层 qa 例外和 Windows 脚本仍在阶段 1 中，验收未完成。真实模型费用 0 元。
 
 实际原文件修改（2026-11-07）：`apps/server/src/utils/ai/index.ts` 为生产编剧增加可选执行策略，显式传入输出 token 上限、关闭 SDK 重试、按调用限制一次网络请求并拒绝自动重定向、启用原始用量采集。未传入该策略的原聊天调用保持原参数与重试行为。生产适配位于 `apps/server/src/utils/production/textProvider.ts`，沿用宿主的协议 SDK 和直连访问检查；多租户路由拒绝走此本地生产入口。`production/index.ts` 按需加载该适配，避免仅恢复生产任务时初始化模型配置。

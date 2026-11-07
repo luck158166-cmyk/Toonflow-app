@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { listAssetReferences } from "@toonflow/production";
 import u from "@/utils";
 import { validateFields } from "@/lib/middleware";
 import { error, success } from "@/lib/responseFormat";
@@ -16,7 +17,8 @@ export default router.get("/", validateFields({
   const projectId = req.query.projectId as string;
   const result = await u.production.withProduction(directory, (catalog, store) => {
     const story = catalog.getStory(projectId);
-    return story ? { story, ...catalog.getProjectProduction(projectId), tasks: store.listProjectTasks(projectId) } : null;
+    return story ? { story, ...catalog.getProjectProduction(projectId),
+      assetReferences: listAssetReferences(catalog, projectId), tasks: store.listProjectTasks(projectId) } : null;
   });
   if (!result) return res.status(404).json(error("当前工作区没有这个故事", null, 404));
   res.json(success(result));

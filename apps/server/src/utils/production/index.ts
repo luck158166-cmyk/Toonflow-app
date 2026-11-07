@@ -3,6 +3,12 @@ import { dirname, resolve } from "node:path";
 import { lstat, mkdir, realpath } from "@toonflow/file";
 import { ProductionCatalog, ProductionStore, indexNovel } from "@toonflow/production";
 export { createProjectBackup } from "./projectBackup";
+export async function preserveReferenceImage(directory: string, path: string, sha256: string) {
+  return (await import("./referenceImage")).preserveReferenceImage(directory, path, sha256);
+}
+export async function readPreservedReference(directory: string, reference: { path: string; sha256: string }) {
+  return (await import("./referenceImage")).readPreservedReference(directory, reference);
+}
 export async function createProductionTextProvider(providerId: string, modelId: string, maxOutputTokens: number) {
   return (await import("./textProvider")).createProductionTextProvider(providerId, modelId, maxOutputTokens);
 }

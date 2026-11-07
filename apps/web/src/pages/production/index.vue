@@ -22,10 +22,10 @@
     <section class="mainArea">
       <header class="topBar">
         <div><span class="eyebrow">AI SHORT DRAMA PRODUCTION</span><h1>{{ stageTitle }}</h1></div>
-        <div class="topActions"><span class="safeState">按次授权 · 预算保护</span><el-button class="mobileLink" text @click="router.push('/workspace')">画布</el-button><el-button class="mobileLink" text @click="router.push('/home')">项目</el-button><el-button :loading="loading" @click="refresh">刷新资料</el-button></div>
+        <div class="topActions"><span class="safeState">按次授权 · 预算保护</span><studioSettings /><el-button class="mobileLink" text @click="router.push('/workspace')">画布</el-button><el-button class="mobileLink" text @click="router.push('/home')">项目</el-button><el-button :loading="loading" @click="refresh">刷新资料</el-button></div>
       </header>
       <div class="pageBody" v-loading="loading">
-        <dashboard v-if="activeStage === 'overview'" v-model:storyTitle="storyTitle" v-model:storyText="storyText" :project="project" :storyCount="stories.length" :budget="budget" :savingStory="savingStory" @openStage="activeStage = $event" @importNovel="importNovel" @fileChange="readStoryFile" />
+        <dashboard v-if="activeStage === 'overview'" v-model:storyTitle="storyTitle" v-model:storyText="storyText" :directory="directory" :project="project" :storyCount="stories.length" :budget="budget" :savingStory="savingStory" @openStage="activeStage = $event" @importNovel="importNovel" @fileChange="readStoryFile" />
 
         <template v-else-if="activeStage === 'stories'">
           <div class="sectionHeading"><div><h2>故事资料</h2><p>原文保留在当前工作区，后续分析以它为依据。</p></div><el-button @click="loadStories">刷新故事</el-button></div>
@@ -50,6 +50,7 @@
         </template>
 
         <template v-else-if="activeStage === 'assets'">
+          <section v-if="project" class="surfaceCard"><assetReferencePanel :directory="directory" :projectId="selectedStoryId" @changed="refreshProject" /></section>
           <div class="sectionHeading"><div><h2>人物与场景资产</h2><p>人物、服装、道具和场景独立保存，锁定的资产不能被提取候选覆盖。</p></div><el-button :disabled="!selectedStoryId" @click="refreshProject">刷新资产</el-button></div>
           <div v-if="!project" class="emptyStage">先在左侧故事列表中选择一个故事。</div>
           <template v-else><div class="metricGrid"><article class="metricCard"><span>人物</span><strong>{{ countAssets('character') }}</strong></article><article class="metricCard"><span>场景</span><strong>{{ project.scenes.length }}</strong></article><article class="metricCard"><span>道具与服装</span><strong>{{ countAssets('prop') + countAssets('costume') }}</strong></article></div><div class="assetGrid"><article v-for="asset in project.assets" :key="asset.id" class="surfaceCard assetCard"><div class="cardHeading"><strong>{{ asset.name }}</strong><el-tag size="small" :type="asset.locked ? 'warning' : 'info'">{{ asset.locked ? '已锁定' : assetKindLabel(asset.kind) }}</el-tag></div><p>{{ asset.stableDescription || '尚无稳定外观描述' }}</p><small>首次出现：{{ asset.firstAppearance || '待记录' }}</small></article><article v-for="scene in project.scenes" :key="scene.id" class="surfaceCard assetCard"><div class="cardHeading"><strong>{{ scene.name }}</strong><el-tag size="small">场景</el-tag></div><p>{{ scene.location || '地点待补充' }} · {{ scene.atmosphere || '氛围待补充' }}</p><small>{{ scene.timeWeather || '时间与天气待补充' }}</small></article></div><div v-if="!project.assets.length && !project.scenes.length" class="emptyStage">当前故事尚未建立人物或场景资产。</div></template>
@@ -96,6 +97,8 @@ import dashboard from "./dashboard.vue";
 import draftImport from "./draftImport.vue";
 import adaptationSetup from "./adaptationSetup.vue";
 import episodeReviewPanel from "./episodeReviewPanel.vue";
+import assetReferencePanel from "./assetReferencePanel.vue";
+import studioSettings from "./studioSettings.vue";
 
 type Stage = "overview" | "stories" | "episodes" | "assets" | "shots" | "tasks" | "exports" | "costs";
 const router = useRouter();
