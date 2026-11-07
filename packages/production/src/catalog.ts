@@ -14,8 +14,11 @@ export type EpisodeDraft = {
   episodeNumber: number; title: string; logline: string; outline: string[]; script: unknown[];
   scenes: Array<{ name: string; location: string; atmosphere: string; timeWeather: string; evidence: string[] }>;
   characters: Array<{ name: string; aliases: string[]; stableDescription: string; evidence: string[]; firstAppearance: string }>;
+  props?: Array<{ name: string; aliases: string[]; stableDescription: string; evidence: string[]; firstAppearance: string }>;
   shots: Array<{ sequence: number; sceneName: string; title: string; scriptExcerpt: string; evidence: string[];
     durationMs: number; shotSize: string; movement: string; promptText: string; characterNames: string[];
+    propUses?: Array<{ name: string; holderBeforeName?: string; holderAfterName?: string;
+      stateBefore: string; stateAfter: string; interaction: string; evidence: string[] }>;
     dialogue: Array<{ kind: DialogueKind; speakerName?: string; listenerName?: string; text: string; emotion?: string; voiceProfile?: string }> }>;
 };
 
@@ -115,6 +118,17 @@ export class ProductionCatalog {
         costume_id TEXT REFERENCES production_asset(id),
         PRIMARY KEY (shot_id, character_id)
       );
+      CREATE TABLE IF NOT EXISTS shot_prop_link (
+        shot_id TEXT NOT NULL REFERENCES production_shot(id),
+        prop_id TEXT NOT NULL REFERENCES production_asset(id),
+        holder_before_id TEXT REFERENCES production_asset(id),
+        holder_after_id TEXT REFERENCES production_asset(id),
+        state_before TEXT NOT NULL,
+        state_after TEXT NOT NULL,
+        interaction TEXT NOT NULL,
+        evidence_json TEXT NOT NULL,
+        PRIMARY KEY (shot_id, prop_id)
+      );
       CREATE TABLE IF NOT EXISTS shot_dialogue (
         id TEXT PRIMARY KEY,
         shot_id TEXT NOT NULL REFERENCES production_shot(id),
@@ -141,9 +155,10 @@ export class ProductionCatalog {
         created_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS production_shot_episode_order ON production_shot(episode_id, sequence);
+      CREATE INDEX IF NOT EXISTS shot_prop_link_prop ON shot_prop_link(prop_id);
       CREATE INDEX IF NOT EXISTS extracted_candidate_state ON extracted_candidate(project_id, state, kind);
     `);
-    db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (2, ?) ON CONFLICT(version) DO NOTHING`)
+    db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (3, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
   }
 
@@ -253,6 +268,19 @@ export class ProductionCatalog {
         cameraAngle: string; movement: string; durationMs: number; promptText: string;
         promptVersion: number; reviewState: ReviewState; runtimeState: RuntimeState;
         videoReadiness: VideoReadiness }>;
+    const shotProps = this.db.query(`SELECT l.shot_id AS shotId, l.prop_id AS propId, p.name AS propName,
+      l.holder_before_id AS holderBeforeId, before_holder.name AS holderBeforeName,
+      l.holder_after_id AS holderAfterId, after_holder.name AS holderAfterName,
+      l.state_before AS stateBefore, l.state_after AS stateAfter,
+      l.interaction, l.evidence_json AS evidenceJson
+      FROM shot_prop_link l JOIN production_shot s ON s.id = l.shot_id
+      JOIN production_asset p ON p.id = l.prop_id
+      LEFT JOIN production_asset before_holder ON before_holder.id = l.holder_before_id
+      LEFT JOIN production_asset after_holder ON after_holder.id = l.holder_after_id
+      WHERE s.project_id = ? ORDER BY s.episode_id, s.sequence, p.name`).all(projectId) as Array<{
+        shotId: string; propId: string; propName: string; holderBeforeId: string | null;
+        holderBeforeName: string | null; holderAfterId: string | null; holderAfterName: string | null;
+        stateBefore: string; stateAfter: string; interaction: string; evidenceJson: string }>;
     return {
       chapterIndex,
       analysis: analysisRow ? { events: JSON.parse(analysisRow.eventsJson) as unknown[],
@@ -268,6 +296,7 @@ export class ProductionCatalog {
       scenes: scenes.map(({ evidenceJson, locked, ...scene }) => ({ ...scene,
         evidence: JSON.parse(evidenceJson) as unknown[], locked: !!locked })),
       shots: shots.map(({ evidenceJson, ...shot }) => ({ ...shot, evidence: JSON.parse(evidenceJson) as unknown[] })),
+      shotProps: shotProps.map(({ evidenceJson, ...link }) => ({ ...link, evidence: JSON.parse(evidenceJson) as unknown[] })),
     };
   }
 
@@ -288,10 +317,14 @@ export class ProductionCatalog {
     timeWeather?: string; evidence: unknown[] }) {
     if (!input.projectId.trim() || !input.name.trim() || !Array.isArray(input.evidence)) throw new TypeError("Scene name and evidence are required.");
     const canonicalName = input.name.trim().toLocaleLowerCase();
-    const existing = input.id ? this.db.query(`SELECT id, locked FROM production_scene WHERE id = ? AND project_id = ?`)
-      .get(input.id, input.projectId) as { id: string; locked: number } | null
-      : this.db.query(`SELECT id, locked FROM production_scene WHERE project_id = ? AND canonical_name = ?`)
-        .get(input.projectId, canonicalName) as { id: string; locked: number } | null;
+    const existing = input.id ? this.db.query(`SELECT id, locked, location, atmosphere,
+      time_weather AS timeWeather, evidence_json AS evidenceJson FROM production_scene
+      WHERE id = ? AND project_id = ?`).get(input.id, input.projectId) as
+        | { id: string; locked: number; location: string; atmosphere: string; timeWeather: string; evidenceJson: string } | null
+      : this.db.query(`SELECT id, locked, location, atmosphere, time_weather AS timeWeather,
+        evidence_json AS evidenceJson FROM production_scene WHERE project_id = ? AND canonical_name = ?`)
+        .get(input.projectId, canonicalName) as
+          | { id: string; locked: number; location: string; atmosphere: string; timeWeather: string; evidenceJson: string } | null;
     if (existing?.locked) throw new Error("Locked scene assets cannot be overwritten.");
     const id = existing?.id ?? input.id ?? randomUUID();
     const now = Date.now();
@@ -300,8 +333,9 @@ export class ProductionCatalog {
       ON CONFLICT(id) DO UPDATE SET name = excluded.name, canonical_name = excluded.canonical_name,
       location = excluded.location, atmosphere = excluded.atmosphere, time_weather = excluded.time_weather,
       evidence_json = excluded.evidence_json, updated_at = excluded.updated_at`)
-      .run(id, input.projectId, input.name.trim(), canonicalName, input.location ?? "", input.atmosphere ?? "",
-        input.timeWeather ?? "", JSON.stringify(input.evidence), now, now);
+      .run(id, input.projectId, input.name.trim(), canonicalName, input.location ?? existing?.location ?? "",
+        input.atmosphere ?? existing?.atmosphere ?? "", input.timeWeather ?? existing?.timeWeather ?? "",
+        JSON.stringify([...(existing ? JSON.parse(existing.evidenceJson) as unknown[] : []), ...input.evidence]), now, now);
     return id;
   }
 
@@ -309,10 +343,18 @@ export class ProductionCatalog {
     stableDescription?: string; evidence: unknown[]; firstAppearance?: string; variantOf?: string }) {
     if (!input.projectId.trim() || !input.name.trim() || !Array.isArray(input.evidence)) throw new TypeError("Asset name and evidence are required.");
     const canonicalName = input.name.trim().toLocaleLowerCase();
-    const existing = input.id ? this.db.query(`SELECT id, locked FROM production_asset WHERE id = ? AND project_id = ?`)
-      .get(input.id, input.projectId) as { id: string; locked: number } | null
-      : this.db.query(`SELECT id, locked FROM production_asset WHERE project_id = ? AND kind = ? AND canonical_name = ?`)
-        .get(input.projectId, input.kind, canonicalName) as { id: string; locked: number } | null;
+    const existing = input.id ? this.db.query(`SELECT id, locked, aliases_json AS aliasesJson,
+      stable_description AS stableDescription, evidence_json AS evidenceJson,
+      first_appearance AS firstAppearance, variant_of AS variantOf FROM production_asset
+      WHERE id = ? AND project_id = ?`).get(input.id, input.projectId) as
+        | { id: string; locked: number; aliasesJson: string; stableDescription: string;
+          evidenceJson: string; firstAppearance: string; variantOf: string | null } | null
+      : this.db.query(`SELECT id, locked, aliases_json AS aliasesJson, stable_description AS stableDescription,
+        evidence_json AS evidenceJson, first_appearance AS firstAppearance, variant_of AS variantOf
+        FROM production_asset WHERE project_id = ? AND kind = ? AND canonical_name = ?`)
+        .get(input.projectId, input.kind, canonicalName) as
+          | { id: string; locked: number; aliasesJson: string; stableDescription: string;
+            evidenceJson: string; firstAppearance: string; variantOf: string | null } | null;
     if (existing?.locked) throw new Error("Locked assets cannot be overwritten.");
     const id = existing?.id ?? input.id ?? randomUUID();
     const now = Date.now();
@@ -323,9 +365,11 @@ export class ProductionCatalog {
       aliases_json = excluded.aliases_json, stable_description = excluded.stable_description,
       evidence_json = excluded.evidence_json, first_appearance = excluded.first_appearance,
       variant_of = excluded.variant_of, updated_at = excluded.updated_at`)
-      .run(id, input.projectId, input.kind, input.name.trim(), canonicalName, JSON.stringify(input.aliases ?? []),
-        input.stableDescription ?? "", JSON.stringify(input.evidence), input.firstAppearance ?? "",
-        input.variantOf ?? null, now, now);
+      .run(id, input.projectId, input.kind, input.name.trim(), canonicalName,
+        JSON.stringify([...new Set([...(existing ? JSON.parse(existing.aliasesJson) as string[] : []), ...(input.aliases ?? [])])]),
+        input.stableDescription ?? existing?.stableDescription ?? "",
+        JSON.stringify([...(existing ? JSON.parse(existing.evidenceJson) as unknown[] : []), ...input.evidence]),
+        existing?.firstAppearance || input.firstAppearance || "", input.variantOf ?? existing?.variantOf ?? null, now, now);
     return id;
   }
 
@@ -410,6 +454,30 @@ export class ProductionCatalog {
       .run(shotId, characterId, costumeId ?? null);
   }
 
+  linkPropToShot(input: { shotId: string; propId: string; holderBeforeId?: string;
+    holderAfterId?: string; stateBefore: string; stateAfter: string; interaction: string; evidence: unknown[] }) {
+    if (!input.stateBefore.trim() || !input.stateAfter.trim() || !input.interaction.trim()
+      || !Array.isArray(input.evidence) || !input.evidence.length) {
+      throw new TypeError("A shot prop needs before/after state, interaction and source evidence.");
+    }
+    const shot = this.db.query(`SELECT project_id FROM production_shot WHERE id = ?`).get(input.shotId) as
+      | { project_id: string } | null;
+    const ids = [input.propId, input.holderBeforeId, input.holderAfterId].filter((id): id is string => !!id);
+    const assets = ids.map(id => this.db.query(`SELECT id, project_id AS projectId, kind FROM production_asset WHERE id = ?`)
+      .get(id) as { id: string; projectId: string; kind: AssetKind } | null);
+    if (!shot || !assets[0] || assets[0].kind !== "prop" || assets.some(asset => !asset || asset.projectId !== shot.project_id)
+      || assets.slice(1).some(asset => asset?.kind !== "character")) {
+      throw new Error("Shot prop and its holders must be assets of the correct kind in the same project.");
+    }
+    this.db.query(`INSERT INTO shot_prop_link(shot_id, prop_id, holder_before_id, holder_after_id,
+      state_before, state_after, interaction, evidence_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(shot_id, prop_id) DO UPDATE SET holder_before_id = excluded.holder_before_id,
+      holder_after_id = excluded.holder_after_id, state_before = excluded.state_before,
+      state_after = excluded.state_after, interaction = excluded.interaction, evidence_json = excluded.evidence_json`)
+      .run(input.shotId, input.propId, input.holderBeforeId ?? null, input.holderAfterId ?? null,
+        input.stateBefore.trim(), input.stateAfter.trim(), input.interaction.trim(), JSON.stringify(input.evidence));
+  }
+
   addExtractedCandidate(input: { projectId: string; episodeId: string; shotId: string;
     kind: "character" | "scene" | "prop" | "costume" | "dialogue"; value: unknown; evidence: unknown[]; confidence: number }) {
     if (!Array.isArray(input.evidence) || input.evidence.length === 0 || !Number.isFinite(input.confidence)
@@ -440,14 +508,52 @@ export class ProductionCatalog {
       JOIN production_shot s ON s.id = l.shot_id WHERE s.episode_id = ?`).get(episodeId) as { count: number };
     const scenes = new Set(shots.map((shot) => shot.sceneId).filter(Boolean));
     const issues: string[] = [];
-    if (shots.length < 8 || shots.length > 12) issues.push("Episode needs 8 to 12 shots for acceptance.");
-    if (characters.count < 2) issues.push("Episode needs at least two linked characters.");
-    if (scenes.size < 3) issues.push("Episode needs at least three distinct scenes.");
+    if (!shots.length) issues.push("Episode needs at least one shot.");
     if (shots.some((shot) => shot.reviewState !== "confirmed" || shot.videoReadiness !== "ready")) {
       issues.push("All shots must be confirmed and video-ready.");
     }
     if (shots.some((shot) => !shot.scriptExcerpt.trim())) issues.push("Every shot needs a script excerpt.");
+    issues.push(...this.validatePropContinuity(episodeId));
     return { ready: issues.length === 0, issues, shotCount: shots.length, characterCount: characters.count, sceneCount: scenes.size };
+  }
+
+  validateAcceptanceEpisode(episodeId: string) {
+    const report = this.validateEpisodeForSynthesis(episodeId);
+    const issues = [...report.issues];
+    if (report.shotCount < 8 || report.shotCount > 12) issues.push("Acceptance episode needs 8 to 12 shots.");
+    if (report.characterCount < 2) issues.push("Acceptance episode needs at least two linked characters.");
+    if (report.sceneCount < 3) issues.push("Acceptance episode needs at least three distinct scenes.");
+    return { ...report, ready: issues.length === 0, issues };
+  }
+
+  validatePropContinuity(episodeId: string) {
+    const episode = this.db.query(`SELECT project_id AS projectId, episode_number AS episodeNumber
+      FROM production_episode WHERE id = ?`).get(episodeId) as { projectId: string; episodeNumber: number } | null;
+    if (!episode) throw new Error(`Unknown episode: ${episodeId}`);
+    const events = this.db.query(`SELECT s.episode_id AS episodeId, s.sequence, l.shot_id AS shotId,
+      l.prop_id AS propId, p.name AS propName, l.holder_before_id AS holderBeforeId,
+      l.holder_after_id AS holderAfterId, l.state_before AS stateBefore, l.state_after AS stateAfter
+      FROM shot_prop_link l JOIN production_shot s ON s.id = l.shot_id
+      JOIN production_episode e ON e.id = s.episode_id JOIN production_asset p ON p.id = l.prop_id
+      WHERE e.project_id = ? AND e.episode_number <= ? ORDER BY e.episode_number, s.sequence`)
+      .all(episode.projectId, episode.episodeNumber) as Array<{ episodeId: string; sequence: number;
+        shotId: string; propId: string; propName: string; holderBeforeId: string | null;
+        holderAfterId: string | null; stateBefore: string; stateAfter: string }>;
+    const last = new Map<string, { stateAfter: string; holderAfterId: string | null }>();
+    const issues: string[] = [];
+    for (const event of events) {
+      const previous = last.get(event.propId);
+      if (event.episodeId === episodeId && previous) {
+        if (previous.stateAfter !== event.stateBefore) {
+          issues.push(`镜头 ${event.sequence} 的道具“${event.propName}”前态与上一镜头后态不一致。`);
+        }
+        if (previous.holderAfterId !== event.holderBeforeId) {
+          issues.push(`镜头 ${event.sequence} 的道具“${event.propName}”持有人与上一镜头不一致。`);
+        }
+      }
+      last.set(event.propId, { stateAfter: event.stateAfter, holderAfterId: event.holderAfterId });
+    }
+    return issues;
   }
 }
 
@@ -457,8 +563,8 @@ export function applyEpisodeDraft(catalog: ProductionCatalog, projectId: string,
     || !draft.title.trim() || !draft.logline.trim() || !draft.outline.length || !draft.script.length) {
     throw new TypeError("Episode draft is missing its identity, outline, or script.");
   }
-  if (draft.characters.length < 2 || draft.scenes.length < 3 || draft.shots.length < 8 || draft.shots.length > 12) {
-    throw new Error("Acceptance draft requires at least two characters, three scenes, and eight to twelve shots.");
+  if (!draft.scenes.length || !draft.shots.length || draft.shots.length > 200) {
+    throw new Error("An episode draft needs at least one scene and one shot, with at most 200 shots.");
   }
   const characterNames = new Map<string, string>();
   for (const character of draft.characters) {
@@ -466,7 +572,14 @@ export function applyEpisodeDraft(catalog: ProductionCatalog, projectId: string,
     if (!key || characterNames.has(key) || !character.stableDescription.trim() || !character.evidence.length) {
       throw new Error("Character names must be unique and include descriptions and source evidence.");
     }
-    characterNames.set(key, character.name);
+    characterNames.set(key, key);
+    for (const alias of character.aliases) {
+      const aliasKey = alias.trim().toLocaleLowerCase();
+      if (!aliasKey || characterNames.has(aliasKey) && characterNames.get(aliasKey) !== key) {
+        throw new Error(`Character alias conflicts with another identity: ${alias}`);
+      }
+      characterNames.set(aliasKey, key);
+    }
   }
   const sceneNames = new Map<string, string>();
   for (const scene of draft.scenes) {
@@ -474,21 +587,53 @@ export function applyEpisodeDraft(catalog: ProductionCatalog, projectId: string,
     if (!key || sceneNames.has(key) || !scene.evidence.length) throw new Error("Scene names must be unique and include source evidence.");
     sceneNames.set(key, scene.name);
   }
+  const propNames = new Map<string, string>();
+  for (const prop of draft.props ?? []) {
+    const key = prop.name.trim().toLocaleLowerCase();
+    if (!key || propNames.has(key) || !prop.stableDescription.trim() || !prop.evidence.length) {
+      throw new Error("Prop names must be unique and include descriptions and source evidence.");
+    }
+    propNames.set(key, key);
+    for (const alias of prop.aliases) {
+      const aliasKey = alias.trim().toLocaleLowerCase();
+      if (!aliasKey || propNames.has(aliasKey) && propNames.get(aliasKey) !== key) {
+        throw new Error(`Prop alias conflicts with another identity: ${alias}`);
+      }
+      propNames.set(aliasKey, key);
+    }
+  }
   const sequences = new Set<number>();
   for (const shot of draft.shots) {
     if (!Number.isSafeInteger(shot.sequence) || shot.sequence < 1 || sequences.has(shot.sequence)
       || !shot.scriptExcerpt.trim() || !shot.evidence.length || !Number.isSafeInteger(shot.durationMs) || shot.durationMs < 1
-      || !sceneNames.has(shot.sceneName.trim().toLocaleLowerCase()) || !shot.characterNames.length) {
-      throw new Error("Each shot needs a unique sequence, scene, script evidence, duration, and at least one character.");
+      || !sceneNames.has(shot.sceneName.trim().toLocaleLowerCase())) {
+      throw new Error("Each shot needs a unique sequence, scene, script evidence and duration.");
     }
     sequences.add(shot.sequence);
     for (const name of shot.characterNames) if (!characterNames.has(name.trim().toLocaleLowerCase())) {
       throw new Error(`Shot references an unknown character: ${name}`);
     }
+    const usedProps = new Set<string>();
+    for (const use of shot.propUses ?? []) {
+      const key = propNames.get(use.name.trim().toLocaleLowerCase());
+      if (!key || usedProps.has(key) || !use.stateBefore.trim() || !use.stateAfter.trim()
+        || !use.interaction.trim() || !use.evidence.length) {
+        throw new Error("Shot prop use needs a known unique prop, before/after state, interaction and evidence.");
+      }
+      usedProps.add(key);
+      for (const holder of [use.holderBeforeName, use.holderAfterName]) {
+        if (holder && !characterNames.has(holder.trim().toLocaleLowerCase())) {
+          throw new Error(`Shot prop use references an unknown character holder: ${holder}`);
+        }
+      }
+    }
     for (const line of shot.dialogue) {
       if (!line.text.trim() || (line.kind === "dialogue" && (!line.speakerName
         || !characterNames.has(line.speakerName.trim().toLocaleLowerCase())))) {
         throw new Error("Dialogue lines must contain text and native dialogue must resolve a character speaker.");
+      }
+      if (line.listenerName && !characterNames.has(line.listenerName.trim().toLocaleLowerCase())) {
+        throw new Error(`Dialogue references an unknown listener: ${line.listenerName}`);
       }
     }
   }
@@ -496,13 +641,40 @@ export function applyEpisodeDraft(catalog: ProductionCatalog, projectId: string,
   return catalog.withTransaction(() => {
     const sceneIds = new Map<string, string>();
     for (const scene of draft.scenes) {
-      const id = catalog.upsertScene({ projectId, ...scene });
+      const existing = catalog.db.query(`SELECT id, locked, location, atmosphere, time_weather AS timeWeather
+        FROM production_scene WHERE project_id = ? AND canonical_name = ?`)
+        .get(projectId, scene.name.trim().toLocaleLowerCase()) as
+          | { id: string; locked: number; location: string; atmosphere: string; timeWeather: string } | null;
+      if (existing?.locked && (existing.location !== scene.location || existing.atmosphere !== scene.atmosphere
+        || existing.timeWeather !== scene.timeWeather)) {
+        throw new Error(`Locked scene appearance conflicts with draft: ${scene.name}`);
+      }
+      const id = existing?.locked ? existing.id : catalog.upsertScene({ projectId, ...scene });
       sceneIds.set(scene.name.trim().toLocaleLowerCase(), id);
     }
     const characterIds = new Map<string, string>();
     for (const character of draft.characters) {
-      const id = catalog.upsertAsset({ projectId, kind: "character", ...character });
+      const existing = catalog.db.query(`SELECT id, locked, stable_description AS stableDescription FROM production_asset
+        WHERE project_id = ? AND kind = 'character' AND canonical_name = ?`)
+        .get(projectId, character.name.trim().toLocaleLowerCase()) as
+          | { id: string; locked: number; stableDescription: string } | null;
+      if (existing && existing.stableDescription !== character.stableDescription) {
+        throw new Error(`Character appearance conflicts with prior episodes; create a variant: ${character.name}`);
+      }
+      const id = existing?.locked ? existing.id : catalog.upsertAsset({ projectId, kind: "character", ...character });
       characterIds.set(character.name.trim().toLocaleLowerCase(), id);
+    }
+    const propIds = new Map<string, string>();
+    for (const prop of draft.props ?? []) {
+      const existing = catalog.db.query(`SELECT id, locked, stable_description AS stableDescription FROM production_asset
+        WHERE project_id = ? AND kind = 'prop' AND canonical_name = ?`)
+        .get(projectId, prop.name.trim().toLocaleLowerCase()) as
+          | { id: string; locked: number; stableDescription: string } | null;
+      if (existing && existing.stableDescription !== prop.stableDescription) {
+        throw new Error(`Prop appearance conflicts with prior episodes; create a variant: ${prop.name}`);
+      }
+      const id = existing?.locked ? existing.id : catalog.upsertAsset({ projectId, kind: "prop", ...prop });
+      propIds.set(prop.name.trim().toLocaleLowerCase(), id);
     }
     const episodeId = catalog.createEpisode(projectId, draft.episodeNumber, draft.title, draft.logline);
     catalog.saveEpisodeOutline(episodeId, draft.outline);
@@ -516,14 +688,21 @@ export function applyEpisodeDraft(catalog: ProductionCatalog, projectId: string,
       shotIds.push(shotId);
       if (shot.promptText.trim()) catalog.setShotPrompt(shotId, shot.promptText);
       for (const name of shot.characterNames) catalog.linkCharacterToShot(shotId,
-        characterIds.get(name.trim().toLocaleLowerCase())!);
+        characterIds.get(characterNames.get(name.trim().toLocaleLowerCase())!)!);
+      for (const use of shot.propUses ?? []) {
+        catalog.linkPropToShot({ shotId, propId: propIds.get(propNames.get(use.name.trim().toLocaleLowerCase())!)!,
+          holderBeforeId: use.holderBeforeName ? characterIds.get(characterNames.get(use.holderBeforeName.trim().toLocaleLowerCase())!) : undefined,
+          holderAfterId: use.holderAfterName ? characterIds.get(characterNames.get(use.holderAfterName.trim().toLocaleLowerCase())!) : undefined,
+          stateBefore: use.stateBefore, stateAfter: use.stateAfter, interaction: use.interaction, evidence: use.evidence });
+      }
       for (const [index, line] of shot.dialogue.entries()) {
         catalog.addDialogue({ shotId, sequence: index + 1, kind: line.kind,
-          speakerId: line.speakerName ? characterIds.get(line.speakerName.trim().toLocaleLowerCase()) : undefined,
-          listenerId: line.listenerName ? characterIds.get(line.listenerName.trim().toLocaleLowerCase()) : undefined,
+          speakerId: line.speakerName ? characterIds.get(characterNames.get(line.speakerName.trim().toLocaleLowerCase())!) : undefined,
+          listenerId: line.listenerName ? characterIds.get(characterNames.get(line.listenerName.trim().toLocaleLowerCase())!) : undefined,
           text: line.text, emotion: line.emotion, voiceProfile: line.voiceProfile });
       }
     }
-    return { episodeId, shotIds, characterIds: [...characterIds.values()], sceneIds: [...sceneIds.values()], awaitingReview: true };
+    return { episodeId, shotIds, characterIds: [...characterIds.values()], sceneIds: [...sceneIds.values()],
+      propIds: [...propIds.values()], awaitingReview: true };
   });
 }

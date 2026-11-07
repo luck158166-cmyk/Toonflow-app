@@ -49,7 +49,7 @@
 
         <template v-else-if="activeStage === 'shots'">
           <div class="sectionHeading"><div><h2>镜头与片段</h2><p>内容确认、运行任务和视频准备度分别显示，避免把“已写好”误认成“已生成”。</p></div><el-button :disabled="!selectedStoryId" @click="refreshProject">刷新镜头</el-button></div>
-          <section class="surfaceCard"><el-table :data="project?.shots ?? []" maxHeight="calc(100vh - 245px)" emptyText="当前故事尚无分镜"><el-table-column label="镜头" width="100"><template #default="{ row }">{{ row.episodeNumber }}-{{ row.sequence }}</template></el-table-column><el-table-column prop="title" label="标题" minWidth="130" /><el-table-column prop="scriptExcerpt" label="剧本依据" minWidth="200" showOverflowTooltip /><el-table-column label="时长" width="90"><template #default="{ row }">{{ (row.durationMs / 1000).toFixed(1) }} 秒</template></el-table-column><el-table-column prop="reviewState" label="内容确认" width="110" /><el-table-column prop="runtimeState" label="运行状态" width="110" /><el-table-column prop="videoReadiness" label="视频准备" width="110" /><el-table-column prop="promptText" label="提示词" minWidth="220" showOverflowTooltip /></el-table></section>
+          <section class="surfaceCard"><el-table :data="project?.shots ?? []" maxHeight="calc(100vh - 245px)" emptyText="当前故事尚无分镜"><el-table-column label="镜头" width="100"><template #default="{ row }">{{ row.episodeNumber }}-{{ row.sequence }}</template></el-table-column><el-table-column prop="title" label="标题" minWidth="130" /><el-table-column prop="scriptExcerpt" label="剧本依据" minWidth="200" showOverflowTooltip /><el-table-column label="道具状态" minWidth="220" showOverflowTooltip><template #default="{ row }">{{ propSummary(row.id) }}</template></el-table-column><el-table-column label="时长" width="90"><template #default="{ row }">{{ (row.durationMs / 1000).toFixed(1) }} 秒</template></el-table-column><el-table-column prop="reviewState" label="内容确认" width="110" /><el-table-column prop="runtimeState" label="运行状态" width="110" /><el-table-column prop="videoReadiness" label="视频准备" width="110" /><el-table-column prop="promptText" label="提示词" minWidth="220" showOverflowTooltip /></el-table></section>
         </template>
 
         <template v-else-if="activeStage === 'tasks'">
@@ -118,13 +118,13 @@ const priceUnitSize = ref(1);
 const priceAmount = ref("");
 const priceCurrency = ref("CNY");
 const priceSourceUrl = ref("");
-const stageLabels: Record<Stage, string> = { overview: "项目总览", stories: "故事资料", episodes: "分集剧本", assets: "人物与场景", shots: "镜头与片段", tasks: "生成任务", exports: "成片管理", costs: "费用与备份" };
+const stageLabels: Record<Stage, string> = { overview: "项目总览", stories: "故事资料", episodes: "分集剧本", assets: "人物场景道具", shots: "镜头与片段", tasks: "生成任务", exports: "成片管理", costs: "费用与备份" };
 const stageTitle = computed(() => stageLabels[activeStage.value]);
 const navigation = computed(() => ([
   { key: "overview", label: "项目总览", icon: IconHome },
   { key: "stories", label: "故事资料", icon: IconBook2, count: stories.value.length },
   { key: "episodes", label: "分集剧本", icon: IconClipboardText, count: project.value?.episodes.length },
-  { key: "assets", label: "人物与场景", icon: IconBox, count: (project.value?.assets.length ?? 0) + (project.value?.scenes.length ?? 0) },
+  { key: "assets", label: "人物场景道具", icon: IconBox, count: (project.value?.assets.length ?? 0) + (project.value?.scenes.length ?? 0) },
   { key: "shots", label: "镜头与片段", icon: IconPhotoVideo, count: project.value?.shots.length },
   { key: "tasks", label: "生成任务", icon: IconChecklist, count: project.value?.tasks.length },
   { key: "exports", label: "成片管理", icon: IconMovie, count: synthesisTasks.value.length },
@@ -145,6 +145,11 @@ function errorMessage(cause: unknown) {
 function sourceLabel(kind: SourceKind) { return { synopsis: "故事梗概", novel: "小说", script: "剧本" }[kind]; }
 function assetKindLabel(kind: ProjectProduction["assets"][number]["kind"]) { return { character: "人物", prop: "道具", costume: "服装" }[kind]; }
 function countAssets(kind: ProjectProduction["assets"][number]["kind"]) { return project.value?.assets.filter(asset => asset.kind === kind).length ?? 0; }
+function propSummary(shotId: string) {
+  return project.value?.shotProps.filter(link => link.shotId === shotId)
+    .map(link => `${link.propName}：${link.stateBefore} → ${link.stateAfter}${link.holderAfterName ? `（${link.holderAfterName}持有）` : ""}`)
+    .join("；") || "—";
+}
 function formatMoney(micros: number, currency: string | null) { return `${(micros / 1_000_000).toFixed(2)} ${currency ?? "CNY"}`; }
 
 async function loadStories() {

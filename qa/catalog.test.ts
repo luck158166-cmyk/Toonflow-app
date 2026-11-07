@@ -128,11 +128,17 @@ describe("structured production catalog", () => {
         { name: "林澄", aliases: ["小澄"], stableDescription: "黑发，雨衣", evidence: ["林澄走上码头"], firstAppearance: "开场" },
         { name: "沈舟", aliases: [], stableDescription: "卷发，旧式收音机", evidence: ["沈舟打开收音机"], firstAppearance: "书店" },
       ],
+      props: [{ name: "密信", aliases: ["信"], stableDescription: "封口的牛皮纸信封",
+        evidence: ["沈舟递出密信"], firstAppearance: "码头" }],
       shots: Array.from({ length: 8 }, (_, index) => ({ sequence: index + 1,
         sceneName: ["码头", "书店", "灯塔"][index % 3], title: `镜头${index + 1}`,
         scriptExcerpt: `两人继续调查线索${index + 1}。`, evidence: [`原文片段${index + 1}`],
         durationMs: 5000, shotSize: "MS", movement: "缓慢推进", promptText: `镜头提示${index + 1}`,
-        characterNames: index % 2 ? ["沈舟"] : ["林澄"],
+        characterNames: index % 2 ? ["沈舟"] : ["小澄"],
+        propUses: index < 2 ? [{ name: index === 0 ? "信" : "密信", holderBeforeName: index === 0 ? "小澄" : "沈舟",
+          holderAfterName: "沈舟", stateBefore: index === 0 ? "封口" : "拆开",
+          stateAfter: "拆开", interaction: index === 0 ? "交给沈舟" : "查看信件",
+          evidence: ["沈舟查看密信"] }] : [],
         dialogue: [{ kind: index === 7 ? "narration" as const : "dialogue" as const,
           speakerName: index === 7 ? undefined : (index % 2 ? "沈舟" : "林澄"), text: `台词${index + 1}` }],
       })),
@@ -147,12 +153,49 @@ describe("structured production catalog", () => {
     for (const shotId of applied.shotIds) catalog.setShotWorkflowState(shotId,
       { reviewState: "confirmed", videoReadiness: "ready" });
     expect(catalog.validateEpisodeForSynthesis(applied.episodeId).ready).toBe(true);
+    expect(catalog.getProjectProduction(projectId).shotProps).toHaveLength(2);
 
-    const invalidDraft = { ...draft, episodeNumber: 2, shots: draft.shots.map((shot, index) =>
+    catalog.linkPropToShot({ shotId: applied.shotIds[1]!, propId: applied.propIds[0]!,
+      holderBeforeId: applied.characterIds[0], holderAfterId: applied.characterIds[1],
+      stateBefore: "封口", stateAfter: "拆开", interaction: "查看信件", evidence: ["沈舟查看密信"] });
+    expect(catalog.validateEpisodeForSynthesis(applied.episodeId).issues).toEqual(expect.arrayContaining([
+      expect.stringContaining("前态"), expect.stringContaining("持有人"),
+    ]));
+    catalog.linkPropToShot({ shotId: applied.shotIds[1]!, propId: applied.propIds[0]!,
+      holderBeforeId: applied.characterIds[1], holderAfterId: applied.characterIds[1],
+      stateBefore: "拆开", stateAfter: "拆开", interaction: "查看信件", evidence: ["沈舟查看密信"] });
+
+    catalog.setAssetLocked(applied.characterIds[0]!, true);
+    catalog.setAssetLocked(applied.propIds[0]!, true);
+    const continuation: EpisodeDraft = { ...draft, episodeNumber: 2, title: "第二封电报",
+      shots: [{ ...draft.shots[0]!, sequence: 1, propUses: [{ name: "密信", holderBeforeName: "沈舟",
+        holderAfterName: "沈舟", stateBefore: "拆开", stateAfter: "收起",
+        interaction: "把密信收进口袋", evidence: ["沈舟收起密信"] }] }] };
+    const continued = applyEpisodeDraft(catalog, projectId, continuation);
+    catalog.setShotWorkflowState(continued.shotIds[0]!, { reviewState: "confirmed", videoReadiness: "ready" });
+    expect(catalog.validateEpisodeForSynthesis(continued.episodeId).ready).toBe(true);
+    expect(catalog.validateAcceptanceEpisode(continued.episodeId).ready).toBe(false);
+    expect(continued.propIds[0]).toBe(applied.propIds[0]);
+    const snapshot = catalog.getProjectProduction(projectId);
+    expect(snapshot.assets.find(asset => asset.id === applied.characterIds[1])?.evidence).toHaveLength(2);
+    expect(snapshot.assets.find(asset => asset.id === applied.propIds[0])?.firstAppearance).toBe("码头");
+    expect(snapshot.scenes.find(scene => scene.name === "码头")?.evidence).toHaveLength(2);
+    catalog.linkPropToShot({ shotId: continued.shotIds[0]!, propId: continued.propIds[0]!,
+      holderBeforeId: applied.characterIds[0], holderAfterId: applied.characterIds[1],
+      stateBefore: "封口", stateAfter: "收起", interaction: "把密信收进口袋", evidence: ["沈舟收起密信"] });
+    expect(catalog.validatePropContinuity(continued.episodeId)).toEqual(expect.arrayContaining([
+      expect.stringContaining("前态"), expect.stringContaining("持有人"),
+    ]));
+
+    const alteredProp: EpisodeDraft = { ...continuation, episodeNumber: 3,
+      props: [{ ...draft.props![0]!, stableDescription: "银色信封" }] };
+    expect(() => applyEpisodeDraft(catalog, projectId, alteredProp)).toThrow("create a variant");
+
+    const invalidDraft = { ...draft, episodeNumber: 3, shots: draft.shots.map((shot, index) =>
       index === 0 ? { ...shot, characterNames: ["missing"] } : shot) };
     expect(() => applyEpisodeDraft(catalog, projectId, invalidDraft)).toThrow("unknown character");
     expect(db.query("SELECT COUNT(*) AS count FROM production_episode WHERE project_id = ?").get(projectId))
-      .toEqual({ count: 1 });
+      .toEqual({ count: 2 });
     db.close();
   });
 });
