@@ -49,6 +49,14 @@ export type ProjectProduction = { story: StoryDetail;
     provider: string; modelId: string; state: string; billable: number;
     estimatedCostMicros: number; currency: string; reservedMicros: number;
     chargedMicros: number; outputCount: number; createdAt: number; updatedAt: number }> };
+export type EpisodeReview = { snapshotHash: string; sourceText: string; issues: string[]; hasSuccessor: boolean;
+  snapshot: { sourceHash: string; episode: ProjectProduction["episodes"][number];
+    shots: Array<Omit<ProjectProduction["shots"][number], "runtimeState" | "videoReadiness">>;
+    assets: ProjectProduction["assets"]; scenes: ProjectProduction["scenes"]; props: ProjectProduction["shotProps"];
+    characters: Array<{ shotId: string; characterId: string; costumeId: string | null }>;
+    dialogue: Array<{ id: string; shotId: string; sequence: number; kind: string; speakerId: string | null;
+      listenerId: string | null; text: string; emotion: string; voiceProfile: string }> };
+  history: Array<{ id: string; decision: "confirmed" | "changes_requested"; note: string; reviewedBy: string; createdAt: number }> };
 export type PriceRule = { id: string; provider: string; modelId: string; unit: string; unitSize: number;
   unitPriceMicros: number; currency: string; sourceUrl: string; effectiveAt: number; recordedBy: string; createdAt: number };
 export type PriceRuleInput = Pick<PriceRule, "provider" | "modelId" | "unit" | "unitSize" | "unitPriceMicros" | "currency" | "sourceUrl" | "effectiveAt">;
@@ -63,6 +71,16 @@ export type BudgetOverview = { global: BudgetUsage; globalHistory: BudgetChange[
 const client = axios.create({ baseURL: "/api/production", headers: { "x-toonflow-workspace": "1" } });
 
 const productionApi = {
+  async getEpisodeReview(directory: string, projectId: string, episodeId: string) {
+    const { data } = await client.get<{ data: EpisodeReview }>("/getEpisodeReview", { params: { directory, projectId, episodeId } });
+    return data.data;
+  },
+  async reviewEpisode(directory: string, projectId: string, episodeId: string, snapshotHash: string,
+    decision: "confirmed" | "changes_requested", note: string) {
+    const { data } = await client.post<{ data: { reviewId: string; alreadyReviewed: boolean } }>("/reviewEpisode",
+      { directory, projectId, episodeId, snapshotHash, decision, note });
+    return data.data;
+  },
   async listTextModels() {
     const { data } = await axios.get<{ data: ProductionTextModel[] }>("/api/ai/models");
     return data.data;

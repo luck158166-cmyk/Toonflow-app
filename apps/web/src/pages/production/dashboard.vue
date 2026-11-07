@@ -8,7 +8,7 @@
       <div class="trackHeading"><strong><icon-route :size="18" />制作进度</strong><span id="automationStatus">可在分集工作台授权生成剧本，整片自动生产仍在接入。</span></div>
       <div class="workflow"><button v-for="(step, index) in workflow" :key="step.label" type="button" class="workflowStep" :class="{ ready: step.ready }" @click="emit('openStage', step.stage)"><span class="stepIndex"><icon-check v-if="step.ready" :size="16" /><template v-else>{{ String(index + 1).padStart(2, '0') }}</template></span><span class="stepText"><b>{{ step.label }}</b><small>{{ step.status }}</small></span><icon-chevron-right v-if="index < workflow.length - 1" class="stepArrow" :size="16" /></button></div>
     </section>
-    <div v-if="attentionTasks || pendingReview" class="attentionBanner"><icon-info-circle :size="18" /><span>{{ attentionTasks ? `${attentionTasks} 个任务需要处理` : `${pendingReview} 个镜头待确认` }}</span><button type="button" @click="emit('openStage', attentionTasks ? 'tasks' : 'shots')">查看详情 →</button></div>
+    <div v-if="attentionTasks || pendingEpisodes || pendingReview" class="attentionBanner"><icon-info-circle :size="18" /><span>{{ attentionTasks ? `${attentionTasks} 个任务需要处理` : pendingEpisodes ? `${pendingEpisodes} 集内容待审核` : `${pendingReview} 个镜头待确认` }}</span><button type="button" @click="emit('openStage', attentionTasks ? 'tasks' : pendingEpisodes ? 'episodes' : 'shots')">查看详情 →</button></div>
     <div class="creationGrid">
       <section ref="storyPanel" class="studioPanel storyPanel">
         <div class="panelHeader"><div class="panelTitle"><span class="panelIcon"><icon-book-2 :size="20" /></span><div><h3>{{ project ? '故事与剧本' : '导入故事' }}</h3><small>{{ project ? '原文与改编，随时查看' : '支持小说章节原文' }}</small></div></div><button v-if="project" class="textButton" type="button" @click="emit('openStage', 'stories')">全部故事 {{ storyCount }} →</button></div>
@@ -78,11 +78,13 @@ const budgetLabel = computed(() => !props.budget?.global.configured ? "设置预
     : `预算占用 ${Math.round(props.budget.global.usedMicros / props.budget.global.limitMicros * 100)}%`);
 const attentionTasks = computed(() => props.project?.tasks.filter(task => ["failed", "reconcile_required", "reconciling"].includes(task.state)).length ?? 0);
 const pendingReview = computed(() => props.project?.shots.filter(shot => shot.reviewState !== "confirmed").length ?? 0);
+const pendingEpisodes = computed(() => props.project?.episodes.filter(episode => episode.reviewState !== "confirmed").length ?? 0);
 const nextAction = computed(() => {
   if (!props.project) return { label: "导入章节，开始创作", stage: "stories" as Stage };
   if (attentionTasks.value) return { label: "处理制作任务", stage: "tasks" as Stage };
   if (synthesisCount.value) return { label: "查看成片", stage: "exports" as Stage };
   if (!props.project.episodes.length) return { label: "开始改编剧本", stage: "episodes" as Stage };
+  if (pendingEpisodes.value) return { label: "审核本集，继续制作", stage: "episodes" as Stage };
   if (!props.project.shots.length) return { label: "查看分集剧本", stage: "episodes" as Stage };
   return { label: "检查分镜，继续制作", stage: "shots" as Stage };
 });

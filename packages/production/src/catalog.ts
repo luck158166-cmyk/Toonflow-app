@@ -175,12 +175,26 @@ export class ProductionCatalog {
         created_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS extracted_candidate_state ON extracted_candidate(project_id, state, kind);
+      CREATE TABLE IF NOT EXISTS episode_review (
+        id TEXT PRIMARY KEY,
+        episode_id TEXT NOT NULL REFERENCES production_episode(id),
+        snapshot_hash TEXT NOT NULL,
+        result_hash TEXT NOT NULL,
+        snapshot_json TEXT NOT NULL,
+        decision TEXT NOT NULL CHECK (decision IN ('confirmed','changes_requested')),
+        note TEXT NOT NULL,
+        reviewed_by TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS episode_review_history ON episode_review(episode_id, created_at);
     `);
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (3, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (4, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (5, ?) ON CONFLICT(version) DO NOTHING`)
+      .run(Date.now());
+    db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (6, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
   }
 

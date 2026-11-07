@@ -34,8 +34,11 @@ it("uses actual HTTP routes and the host SDK with an intercepted wire, including
     const { default: prepareRoute } = await import("../apps/server/src/routes/production/prepareAdaptation");
     const { default: previewRoute } = await import("../apps/server/src/routes/production/previewAdaptation");
     const { default: runRoute } = await import("../apps/server/src/routes/production/runAdaptation");
+    const { default: reviewDataRoute } = await import("../apps/server/src/routes/production/getEpisodeReview");
+    const { default: reviewRoute } = await import("../apps/server/src/routes/production/reviewEpisode");
     const app = express(); app.use(express.json({ limit: "2mb" }));
     app.use("/prepare", prepareRoute); app.use("/preview", previewRoute); app.use("/run", runRoute);
+    app.use("/reviewData", reviewDataRoute); app.use("/review", reviewRoute);
     app.use((error: Error & { status?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => res.status(error.status ?? 500).json({ message: error.message }));
     server = app.listen(0, "127.0.0.1"); await new Promise<void>(resolve => server!.once("listening", resolve));
     const address = server.address(); if (!address || typeof address === "string") throw new Error("Missing test port");
@@ -71,6 +74,26 @@ it("uses actual HTTP routes and the host SDK with an intercepted wire, including
       expect(result.status).toBe(failProvider ? "reconcile_required" : "succeeded");
       if (!failProvider) expect(result.episodeId).toBeTruthy();
       await post("/run", { ...input, approval }); expect(modelCalls).toBe(before + 1);
+      if (!failProvider) {
+        const query = new URLSearchParams({ directory: workspace, projectId, episodeId: result.episodeId });
+        const reviewData = await fetch(base + "/reviewData?" + query, { headers: { origin: base, "x-toonflow-workspace": "1" } });
+        expect(reviewData.status).toBe(200);
+        const review = (await reviewData.json()).data;
+        expect(review.issues).toEqual([]);
+        const decision = { directory: workspace, projectId, episodeId: result.episodeId,
+          snapshotHash: review.snapshotHash, decision: "confirmed", note: "" };
+        expect((await post("/review", decision, "https://untrusted.example.test")).status).toBe(403);
+        expect((await post("/review", { ...decision, decision: "arbitrary" })).status).toBe(400);
+        expect((await post("/review", { ...decision, projectId: crypto.randomUUID() })).status).toBe(404);
+        expect((await post("/review", { ...decision, snapshotHash: "b".repeat(64) })).status).toBe(409);
+        const accepted = await post("/review", decision); expect(accepted.status).toBe(200);
+        expect((await accepted.json()).data.alreadyReviewed).toBe(false);
+        expect((await (await post("/review", decision)).json()).data.alreadyReviewed).toBe(true);
+        const next = await post("/prepare", { directory: workspace, projectId, options: { episodeNumber: 2,
+          firstChapter: 1, lastChapter: 1, targetSeconds: 5, genre: "悬疑", visualStyle: "动画" } });
+        expect(next.status).toBe(200);
+        expect(modelCalls).toBe(before + 1);
+      }
       await u.production.withProduction(workspace, (catalog, store) => {
         expect(catalog.getProjectProduction(projectId).episodes.length).toBe(failProvider ? 0 : 1);
         expect(store.getTextAuthorization(result.taskId)?.maxCalls).toBe(1);

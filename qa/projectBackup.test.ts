@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "@toonflow/file";
 import { unzipSync } from "fflate";
-import { ProductionCatalog, ProductionStore } from "../packages/production/src";
+import { ProductionCatalog, ProductionStore, getEpisodeReview, reviewEpisode } from "../packages/production/src";
 import { createProjectBackup } from "../apps/server/src/utils/production/projectBackup";
 
 it("backs up WAL catalog and only this workspace's global tasks, charges and reference assets", async () => {
@@ -24,6 +24,9 @@ it("backs up WAL catalog and only this workspace's global tasks, charges and ref
     const domain = new ProductionCatalog(catalog);
     const projectId = domain.importStory({ title: "灯塔故事", sourceKind: "novel", sourceText: "林澄和沈舟寻找灯塔。" });
     const episodeId = domain.createEpisode(projectId, 1, "第一集");
+    const reviewHash = getEpisodeReview(domain, projectId, episodeId).snapshotHash;
+    reviewEpisode(domain, { projectId, episodeId, snapshotHash: reviewHash,
+      decision: "changes_requested", note: "需要补全剧本与分镜" });
     const characterId = domain.upsertAsset({ projectId, kind: "character", name: "林澄", evidence: ["她抵达灯塔"] });
     const otherProjectId = crypto.randomUUID();
     const store = new ProductionStore(global);
@@ -61,6 +64,8 @@ it("backs up WAL catalog and only this workspace's global tasks, charges and ref
     expect(Buffer.from(archive["workspace/assets/reference.png"]!).toString()).toBe("original reference bytes");
     expect(archive["workspace/.production/production.db-wal"]).toBeUndefined();
     const catalogCopy = new Database(archive["workspace/.production/production.db"]!);
+    expect(catalogCopy.query("SELECT decision, note, snapshot_hash FROM episode_review WHERE episode_id = ?").get(episodeId))
+      .toEqual({ decision: "changes_requested", note: "需要补全剧本与分镜", snapshot_hash: reviewHash });
     const globalCopy = new Database(archive["globalProject.db"]!);
     try {
       expect((catalogCopy.query("SELECT source_text FROM production_project").get() as { source_text: string }).source_text)
