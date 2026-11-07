@@ -478,7 +478,7 @@ export async function start(cwd: string, taskId: string, mediaType: "image" | "v
       return snapshot(current, owner);
     }
     if (activeCount >= 1000) invalid("生成任务过多，请稍后重试", 429);
-    await assertProductionGenerationGate(cwd);
+    await assertProductionGenerationGate(cwd, { taskId, mediaType, request: parsed });
     const modelRouteCipher = modelGateway.enabled()
       ? await modelGateway.capture(mediaType, parsed.providerId, parsed.modelId, parsed) : undefined;
     if (owner?.role === "user" && !modelRouteCipher) invalid("多租户模型路由尚未开启", 403);
@@ -561,6 +561,19 @@ export async function cancel(cwd: string, taskIds: string[], owner?: AuthIdentit
       await releaseCharge(task);
     });
   }));
+}
+
+/** Server-only inspection: no submission, resume or network; not part of the HTTP snapshot. */
+export async function inspect(cwd: string, taskId: string, owner?: AuthIdentity | null) {
+  requireOwner(owner);
+  cwd = await realpath(cwd);
+  const key = taskPath(cwd, taskId);
+  return locked(key, async () => {
+    const task = await load(cwd, taskId, key, owner);
+    if (!task) return null;
+    if (task.persistenceError) throw task.persistenceError;
+    return structuredClone(task.record);
+  });
 }
 
 export async function wait(cwd: string, taskId: string, owner?: AuthIdentity | null, signal?: AbortSignal): Promise<GeneratedMedia[]> {

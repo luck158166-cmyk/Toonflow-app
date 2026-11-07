@@ -2,7 +2,22 @@ import { createApp, h } from "../apps/web/node_modules/vue/dist/vue.esm-bundler.
 import productionApi, { type EpisodeReview } from "../apps/web/src/lib/productionApi";
 import "../apps/web/node_modules/element-plus/dist/index.css";
 import dashboard from "../apps/web/src/pages/production/dashboard.vue";
-if (new URLSearchParams(location.search).get("stage") === "models") {
+if (new URLSearchParams(location.search).get("stage") === "videoTasks") {
+  document.querySelector("#notice")!.textContent = "视频任务界面验证 · 页面内模拟，不发送模型请求";
+  const { default: videoTaskPanel } = await import("../apps/web/src/pages/production/videoTaskPanel.vue");
+  productionApi.recoverVideoTask = async () => ({ state: "reconcile_required", message: "供应商接单状态待核对，保留预留费用，不会重新生成。" });
+  createApp({ render: () => h(videoTaskPanel, { directory: "QA", projectId: "qa-project",
+    episodes: [{ id: "qa-episode", episodeNumber: 1, title: "雨夜" }],
+    tasks: [{ id: "qa-task", episodeId: "qa-episode", stage: "video", hostTaskId: "qa-task", segmentKey: "方案 v1 · 片段 1", modelId: "Seedance 2.5", state: "reconcile_required" }],
+    onChanged: () => { document.querySelector("#notice")!.textContent = "已触发任务资料刷新 · QA 页面模拟，无模型调用"; } }) }).mount("#app");
+} else if (new URLSearchParams(location.search).get("stage") === "emptyModels") {
+  document.querySelector("#notice")!.textContent = "缺少模型配置验证 · 真实设置面板，编剧模型列表模拟为空";
+  const { default: adaptationRun } = await import("../apps/web/src/pages/production/adaptationRun.vue");
+  const { createPinia } = await import("../apps/web/node_modules/pinia/dist/pinia.js");
+  let loads = 0;
+  productionApi.listTextModels = async () => { document.querySelector("#notice")!.textContent = `模型列表已刷新 ${++loads} 次 · 无生成请求`; return []; };
+  createApp({ render: () => h(adaptationRun, { directory: "QA", projectId: "qa-project", inputs: [] }) }).use(createPinia()).mount("#app");
+} else if (new URLSearchParams(location.search).get("stage") === "models") {
   document.querySelector("#notice")!.textContent = "统一模型设置验证 · 真实供应商读取 · 未配置密钥，禁止生成";
   const { default: mediaModel } = await import("../apps/web/src/components/settings/panels/mediaModel/index.vue");
   const { createPinia } = await import("../apps/web/node_modules/pinia/dist/pinia.js");

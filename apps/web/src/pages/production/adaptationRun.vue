@@ -10,7 +10,7 @@
       <el-button type="primary" :disabled="!inputId || !selectedModel" :loading="busy && !running" @click="preview">检查输入与费用</el-button>
       <el-button @click="emit('openCosts', selectedModel)">设置预算与价格</el-button>
     </el-form>
-    <p v-if="!models.length" class="hint">尚无可选文本模型。请在原画布的模型设置中配置供应商后刷新。</p>
+    <div v-if="!models.length" class="hint"><p>尚无可选文本模型，可在这里配置供应商。关闭设置后会自动刷新模型列表。</p><studioSettings @closed="loadModels" /></div>
     <div v-if="plan" class="approvalCard">
       <h4>本次编剧调用</h4><p>第 {{ plan.options.episodeNumber }} 集 · 章节 {{ plan.options.firstChapter }}–{{ plan.options.lastChapter }} · {{ plan.options.targetSeconds }} 秒 · {{ plan.options.genre }} / {{ plan.options.visualStyle }}</p>
       <p class="destination">发送至：{{ plan.destination }}</p>
@@ -31,6 +31,7 @@
 import axios from "axios";
 import { computed, onMounted, ref, watch } from "vue";
 import productionApi, { type AdaptationInputSummary, type AdaptationPreview, type AdaptationRequest, type ProductionTextModel } from "@/lib/productionApi";
+import studioSettings from "./studioSettings.vue";
 const props = defineProps<{ directory: string; projectId: string; inputs: AdaptationInputSummary[]; preferredInputId?: string }>();
 const emit = defineEmits<{ changed: []; openCosts: [model: ProductionTextModel | undefined] }>();
 const inputId = ref(""); const modelKey = ref(""); const maxOutputTokens = ref(8192);

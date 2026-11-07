@@ -163,6 +163,8 @@ D:\Temp\claude\c88343a087018856\af42c4a0-6e61-4a5e-b5c2-5bcd9772db65\scratchpad\
 
 实际原文件修改（2026-11-07）：`apps/server/src/utils/media/generation.ts` 在统一供应商执行前检查生产工作区，`apps/server/src/utils/media/tasks.ts` 在新持久任务落盘前执行同一检查。新增判定逻辑独立放在 `apps/server/src/utils/production/generationGate.ts`；现阶段遇到生产故事一律拒绝旧生成路径，后续预算事务接入后需将此处改为经过授权的提交。
 
+生产绑定增补（2026-11-07）：上述两个入口现在将 taskId、媒体类型及请求交给门禁；只有内部生产调用上下文与 SQLite 归属/请求/有效预留匹配才放行首发，普通 HTTP 请求仍无法绕过。`tasks.ts` 新增服务器内部只读 `inspect`，沿用原记录解析、权限和锁，不调用上游、不自动恢复，也不加入公开状态响应。桥接逻辑位于 `utils/production/videoTasks.ts`，首发内部方法尚待上游完整就绪及报价授权接入；当前生产 HTTP 只开放已绑定视频恢复。未修改原供应商恢复、下载或多租户计费语义。
+
 实际原文件修改（2026-11-07）：`apps/server/src/app.ts` 在初始化配置后、开启请求服务前调用全局生产任务恢复。`apps/server/src/utils/production/index.ts` 增加恢复入口，并把配置模块加载延后到实际工作区操作，以便隔离验证。
 
 ## 七、D1–D9 决策建议

@@ -252,7 +252,7 @@ export async function generateMedia(
   task?: MediaGenerationTask,
 ): Promise<GeneratedMedia[]> {
   requireGenerationMode(task);
-  if (!task?.resume) await assertProductionGenerationGate(cwd);
+  if (!task?.resume) await assertProductionGenerationGate(cwd, task ? { taskId: task.taskId, mediaType, request } : undefined);
   const checkpoint = task?.checkpoint;
   let submitted = task?.resume === true || !!checkpoint?.providerData || checkpoint?.assetCount !== undefined || !!checkpoint?.files?.length;
   try {

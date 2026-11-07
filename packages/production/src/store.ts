@@ -74,6 +74,10 @@ export type PricedTaskInput = Omit<TaskInput, "estimatedCostMicros" | "currency"
 export type TextTaskAuthorization = { approvedRequestHash: string; approvedPlanHash: string; priceRuleId: string;
   maxCalls: 1; maxCostMicros: number; currency: "CNY"; maxOutputTokens: number;
   destination: string; contextWindow: number; maxOutputTokensLimit: number };
+export type MediaTaskAuthorization = { approvedRequestHash: string; approvedPlanHash: string; priceRuleId: string;
+  maxCalls: 1; maxCostMicros: number; currency: "CNY" };
+export type HostMediaBinding = { taskId: string; workspace: string; segmentKey: string;
+  mediaType: "image" | "video" | "audio"; requestHash: string; authorization: MediaTaskAuthorization; launchClaimed: boolean };
 export type TaskPriceSnapshot = {
   taskId: string; priceRuleId: string; unit: string; unitSize: number; unitPriceMicros: number;
   quantity: number; currency: string; estimatedCostMicros: number; sourceUrl: string; quotedAt: number;
@@ -126,6 +130,8 @@ function stableJson(value: unknown): string {
   }
   return JSON.stringify(value);
 }
+
+export function serializeHostMediaRequest(value: unknown) { return stableJson(value); }
 
 function assertWorkspaceRelativePath(value: string) {
   const normalized = value.replaceAll("\\", "/");
@@ -304,11 +310,19 @@ export class ProductionStore {
       task_id TEXT PRIMARY KEY REFERENCES generation_task(id), authorization_json TEXT NOT NULL,
       max_calls INTEGER NOT NULL CHECK(max_calls = 1), created_at INTEGER NOT NULL
     );`);
+    db.exec(`CREATE TABLE IF NOT EXISTS host_media_binding (
+      task_id TEXT PRIMARY KEY REFERENCES generation_task(id), workspace TEXT NOT NULL,
+      segment_key TEXT NOT NULL, media_type TEXT NOT NULL CHECK(media_type IN ('image','video','audio')),
+      request_hash TEXT NOT NULL, authorization_json TEXT NOT NULL,
+      launch_claimed INTEGER NOT NULL DEFAULT 0 CHECK(launch_claimed IN (0,1)), created_at INTEGER NOT NULL
+    );`);
     db.query("INSERT INTO schema_migration(version, applied_at) VALUES (1, ?) ON CONFLICT(version) DO NOTHING")
       .run(Date.now());
     db.query("INSERT INTO schema_migration(version, applied_at) VALUES (2, ?) ON CONFLICT(version) DO NOTHING")
       .run(Date.now());
     db.query("INSERT INTO schema_migration(version, applied_at) VALUES (3, ?) ON CONFLICT(version) DO NOTHING")
+      .run(Date.now());
+    db.query("INSERT INTO schema_migration(version, applied_at) VALUES (4, ?) ON CONFLICT(version) DO NOTHING")
       .run(Date.now());
   }
 
@@ -377,6 +391,10 @@ export class ProductionStore {
 
   /** New priced submissions freeze the confirmed rate, quote, and budget reservation together. */
   createPricedTaskAndBeginSubmission(input: PricedTaskInput, authorization?: TextTaskAuthorization): DispatchResult {
+    return this.atomic(() => this.createPricedTaskInTransaction(input, authorization));
+  }
+
+  private createPricedTaskInTransaction(input: PricedTaskInput, authorization?: TextTaskAuthorization): DispatchResult {
     if (input.stage === "text" && (!authorization || authorization.currency !== "CNY"
       || authorization.maxCalls !== 1 || !/^[a-f0-9]{64}$/.test(authorization.approvedPlanHash)
       || !authorization.priceRuleId?.trim()
@@ -393,7 +411,7 @@ export class ProductionStore {
       throw new TypeError("Priced tasks require a model, billing unit, and positive safe-integer quantity.");
     }
     if (input.stage === "synthesis") throw new TypeError("Local synthesis is not a paid model task.");
-    return this.atomic(() => {
+    {
       const { unit, quantity, ...taskInput } = input;
       const billingUnit = unit.trim();
       const old = this.db.query(`SELECT ${taskColumns} FROM generation_task WHERE idempotency_key = ?`)
@@ -428,6 +446,72 @@ export class ProductionStore {
           quote.rule.unitSize, quote.rule.unitPriceMicros, quantity, quote.currency,
           quote.amountMicros, quote.rule.sourceUrl, quotedAt);
       return this.beginSubmissionInTransaction(created.task.id);
+    }
+  }
+
+  /** Called only after server-side readiness checks. Native UUID equals the production task UUID. */
+  createHostMediaTask(input: PricedTaskInput, binding: Omit<HostMediaBinding, "taskId" | "launchClaimed" | "requestHash">) {
+    const { authorization } = binding;
+    const requestHash = createHash("sha256").update(input.requestJson).digest("hex");
+    if (!binding.workspace.trim() || !binding.segmentKey.trim()
+      || ({ image: "image", video: "video", audio: "speech" } as const)[binding.mediaType] !== input.stage
+      || authorization.approvedRequestHash !== requestHash || !/^[a-f0-9]{64}$/.test(authorization.approvedPlanHash)
+      || authorization.currency !== "CNY" || authorization.maxCalls !== 1 || !authorization.priceRuleId.trim()
+      || !Number.isSafeInteger(authorization.maxCostMicros) || authorization.maxCostMicros < 1) {
+      throw new Error("媒体任务必须绑定工作区、片段、完整请求、方案及一次调用的人民币授权");
+    }
+    return this.atomic(() => {
+      const old = this.findTaskByIdempotencyKey(input.idempotencyKey);
+      const saved = old && this.getHostMediaBinding(old.id);
+      if (old && (!saved || saved.workspace !== binding.workspace || saved.segmentKey !== binding.segmentKey
+        || saved.mediaType !== binding.mediaType || stableJson(saved.authorization) !== stableJson(authorization))) {
+        throw new Error("同一媒体任务不能改用其他工作区、片段或授权");
+      }
+      const dispatch = this.createPricedTaskInTransaction(input);
+      const price = this.getTaskPriceSnapshot(dispatch.task.id)!;
+      if (price.priceRuleId !== authorization.priceRuleId || price.currency !== "CNY" || price.estimatedCostMicros > authorization.maxCostMicros) {
+        throw new Error("媒体费用或价格规则已变化，请重新检查并授权");
+      }
+      // Unlike a passive warning, media production must stop before crossing the configured threshold.
+      if (dispatch.status === "warning_90") throw new Error("本次媒体任务将达到预算预警线，尚未提交；请先调整预算或生产计划");
+      if (!saved) this.db.query(`INSERT INTO host_media_binding(task_id, workspace, segment_key, media_type,
+        request_hash, authorization_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(dispatch.task.id, binding.workspace, binding.segmentKey, binding.mediaType, requestHash, JSON.stringify(authorization), Date.now());
+      return { ...dispatch, binding: this.getHostMediaBinding(dispatch.task.id)! };
+    });
+  }
+
+  getHostMediaBinding(taskId: string): HostMediaBinding | null {
+    const row = this.db.query(`SELECT task_id AS taskId, workspace, segment_key AS segmentKey, media_type AS mediaType,
+      request_hash AS requestHash, authorization_json AS authorizationJson, launch_claimed AS launchClaimed
+      FROM host_media_binding WHERE task_id = ?`).get(taskId) as
+      (Omit<HostMediaBinding, "authorization" | "launchClaimed"> & { authorizationJson: string; launchClaimed: number }) | null;
+    if (!row) return null;
+    const { authorizationJson, launchClaimed, ...rest } = row;
+    return { ...rest, launchClaimed: !!launchClaimed, authorization: JSON.parse(authorizationJson) };
+  }
+
+  assertHostMediaSubmission(taskId: string, workspace: string, mediaType: HostMediaBinding["mediaType"], requestJson: string) {
+    const binding = this.getHostMediaBinding(taskId); const task = this.getTask(taskId);
+    const reservation = this.db.query("SELECT amount_micros AS amount, currency, state FROM task_reservation WHERE task_id = ?")
+      .get(taskId) as { amount: number; currency: string; state: string } | null;
+    if (!binding || binding.workspace !== workspace || binding.mediaType !== mediaType
+      || binding.requestHash !== createHash("sha256").update(requestJson).digest("hex") || task.requestJson !== requestJson
+      || task.state !== "dispatching" || !task.requestStarted || task.attempt !== 1
+      || !reservation || reservation.state !== "active" || reservation.amount !== task.estimatedCostMicros
+      || reservation.currency !== "CNY" || reservation.amount > binding.authorization.maxCostMicros) {
+      throw new Error("缺少与当前媒体请求一致的生产归属、授权或有效预算预留");
+    }
+    return binding;
+  }
+
+  claimHostMediaLaunch(taskId: string, workspace: string, mediaType: HostMediaBinding["mediaType"], requestJson: string) {
+    return this.atomic(() => {
+      const binding = this.getHostMediaBinding(taskId);
+      if (binding?.launchClaimed) return false;
+      this.assertHostMediaSubmission(taskId, workspace, mediaType, requestJson);
+      this.db.query("UPDATE host_media_binding SET launch_claimed = 1 WHERE task_id = ?").run(taskId);
+      return true;
     });
   }
 
@@ -647,12 +731,14 @@ export class ProductionStore {
       ((SELECT COUNT(*) FROM media_output o WHERE o.task_id = t.id)
         + (SELECT COUNT(*) FROM text_output x WHERE x.task_id = t.id)) AS outputCount,
       t.created_at AS createdAt, t.updated_at AS updatedAt
+      , h.segment_key AS segmentKey, h.task_id AS hostTaskId
       FROM generation_task t LEFT JOIN task_reservation r ON r.task_id = t.id AND r.state = 'active'
+      LEFT JOIN host_media_binding h ON h.task_id = t.id
       WHERE t.project_id = ? ORDER BY t.created_at DESC, t.id DESC`).all(projectId) as Array<{
         id: string; episodeId: string; shotId: string | null; stage: TaskStage; provider: string;
         modelId: string; state: TaskState; billable: number; estimatedCostMicros: number;
         currency: string; reservedMicros: number; chargedMicros: number; outputCount: number;
-        createdAt: number; updatedAt: number }>;
+        createdAt: number; updatedAt: number; segmentKey: string | null; hostTaskId: string | null }>;
   }
 
   enqueueMediaDownload(taskId: string, slot: string, remoteUrl: string, destinationPath: string,

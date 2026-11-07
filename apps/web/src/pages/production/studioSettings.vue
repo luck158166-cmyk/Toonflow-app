@@ -4,11 +4,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import settings from "@/components/settings/index.vue";
 
 const settingsPanel = ref<InstanceType<typeof settings>>();
 const settingsVisible = ref(false);
+const emit = defineEmits<{ closed: [] }>();
+watch(settingsVisible, (visible, previous) => { if (!visible && previous) emit("closed"); });
 
 function openSettings() {
   if (!settingsPanel.value?.openPanel("languageModel")) settingsVisible.value = true;

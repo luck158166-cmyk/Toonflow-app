@@ -64,6 +64,7 @@
         </template>
 
         <template v-else-if="activeStage === 'tasks'">
+          <videoTaskPanel v-if="project" :directory="directory" :projectId="selectedStoryId" :tasks="project.tasks" :episodes="project.episodes" @changed="refreshProject" />
           <section v-if="project?.tasks.some(task => task.stage === 'text' && task.state === 'succeeded')" class="surfaceCard"><h3>已保存的编剧结果</h3><p class="subtleText">采用前检查原文版本、章节范围、集号、时长和证据；采用后仍需内容审核。</p><div v-for="task in project.tasks.filter(item => item.stage === 'text' && item.state === 'succeeded')" :key="task.id" class="cardHeading"><span>{{ task.modelId }} · {{ new Date(task.updatedAt).toLocaleString() }}</span><el-tag v-if="project.adaptationAdoptions.some(item => item.taskId === task.id)" type="success">已采用</el-tag><el-button v-else type="primary" :loading="adoptingTaskId === task.id" :disabled="!!adoptingTaskId && adoptingTaskId !== task.id" @click="adoptTextResult(task.id)">校验并采用</el-button></div></section>
           <div class="sectionHeading"><div><h2>生成任务</h2><p>在途请求必须先对账；成功产物保留，不能因重启或失败重新提交同一付费任务。</p></div><el-button :disabled="!selectedStoryId" @click="refreshProject">刷新任务</el-button></div>
           <section class="surfaceCard"><el-table :data="project?.tasks ?? []" maxHeight="calc(100vh - 245px)" emptyText="当前故事尚无生成任务"><el-table-column prop="stage" label="环节" width="100" /><el-table-column prop="provider" label="供应商" minWidth="120" /><el-table-column prop="modelId" label="模型" minWidth="150" /><el-table-column prop="state" label="状态" width="145" /><el-table-column label="已结算" width="145"><template #default="{ row }">{{ formatMoney(row.chargedMicros, row.currency) }}</template></el-table-column><el-table-column label="在途预留" width="145"><template #default="{ row }">{{ formatMoney(row.reservedMicros, row.currency) }}</template></el-table-column><el-table-column prop="outputCount" label="产物" width="70" /><el-table-column label="更新时间" minWidth="165"><template #default="{ row }">{{ new Date(row.updatedAt).toLocaleString() }}</template></el-table-column></el-table></section>
@@ -101,6 +102,7 @@ import adaptationSetup from "./adaptationSetup.vue";
 import episodeReviewPanel from "./episodeReviewPanel.vue";
 import assetReferencePanel from "./assetReferencePanel.vue";
 import studioSettings from "./studioSettings.vue";
+import videoTaskPanel from "./videoTaskPanel.vue";
 import shotPreparationPanel from "./shotPreparationPanel.vue";
 import segmentPlanPanel from "./segmentPlanPanel.vue";
 

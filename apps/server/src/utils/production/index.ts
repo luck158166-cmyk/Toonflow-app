@@ -3,6 +3,9 @@ import { dirname, resolve } from "node:path";
 import { lstat, mkdir, realpath } from "@toonflow/file";
 import { ProductionCatalog, ProductionStore, indexNovel } from "@toonflow/production";
 export { createProjectBackup } from "./projectBackup";
+export async function recoverProductionVideoTask(directory: string, projectId: string, taskId: string) {
+  return (await import("./videoTasks")).recoverProductionVideoTask(directory, projectId, taskId);
+}
 export async function inspectShotPreparation(directory: string, catalog: ProductionCatalog, projectId: string, shotId: string) {
   return (await import("./shotPreparation")).inspectShotPreparation(directory, catalog, projectId, shotId);
 }

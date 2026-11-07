@@ -1,6 +1,15 @@
 import { Database } from "bun:sqlite";
 import { resolve } from "node:path";
 import { lstat, realpath } from "@toonflow/file";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { serializeHostMediaRequest, type HostMediaBinding } from "@toonflow/production";
+
+const submissionContext = new AsyncLocalStorage<{ directory: string; taskId: string }>();
+
+/** Internal capability, never accepted from HTTP body/headers. SQLite authorization is rechecked by each gate. */
+export function withProductionMediaSubmission<T>(directory: string, taskId: string, action: () => Promise<T>) {
+  return submissionContext.run({ directory, taskId }, action);
+}
 
 async function existing(path: string) {
   return lstat(path).catch((cause: NodeJS.ErrnoException) => {
@@ -10,8 +19,18 @@ async function existing(path: string) {
 }
 
 /** Legacy media execution has no production reservation. Keep it away from production workspaces. */
-export async function assertProductionGenerationGate(workspaceDirectory: string) {
+export async function assertProductionGenerationGate(workspaceDirectory: string,
+  execution?: { taskId: string; mediaType: HostMediaBinding["mediaType"]; request: unknown }) {
   const directory = await realpath(workspaceDirectory);
+  const context = submissionContext.getStore();
+  if (context && execution && context.directory === directory && context.taskId === execution.taskId) {
+    const { withProduction } = await import("./index");
+    await withProduction(directory, (_catalog, store) => {
+      const binding = store.assertHostMediaSubmission(execution.taskId, directory, execution.mediaType, serializeHostMediaRequest(execution.request));
+      if (!binding.launchClaimed) throw new Error("媒体任务尚未领取唯一提交权");
+    });
+    return;
+  }
   const productionDirectory = resolve(directory, ".production");
   const folder = await existing(productionDirectory);
   if (!folder) return;

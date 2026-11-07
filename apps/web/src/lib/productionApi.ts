@@ -78,7 +78,8 @@ export type ProjectProduction = { story: StoryDetail;
   tasks: Array<{ id: string; episodeId: string; shotId: string | null; stage: string;
     provider: string; modelId: string; state: string; billable: number;
     estimatedCostMicros: number; currency: string; reservedMicros: number;
-    chargedMicros: number; outputCount: number; createdAt: number; updatedAt: number }> };
+    chargedMicros: number; outputCount: number; createdAt: number; updatedAt: number;
+    hostTaskId?: string | null; segmentKey?: string | null }> };
 export type EpisodeReview = { snapshotHash: string; sourceText: string; issues: string[]; hasSuccessor: boolean;
   snapshot: { sourceHash: string; episode: ProjectProduction["episodes"][number];
     shots: Array<Omit<ProjectProduction["shots"][number], "runtimeState" | "videoReadiness">>;
@@ -206,6 +207,10 @@ const productionApi = {
   async getProjectProduction(directory: string, projectId: string) {
     const { data } = await client.get<{ data: ProjectProduction }>("/getProjectProduction",
       { params: { directory, projectId } });
+    return data.data;
+  },
+  async recoverVideoTask(directory: string, projectId: string, taskId: string) {
+    const { data } = await client.post<{ data: { state: string; message: string } }>("/recoverVideoTask", { directory, projectId, taskId });
     return data.data;
   },
   async exportBackup(directory: string) {
