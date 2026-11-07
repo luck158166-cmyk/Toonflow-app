@@ -66,6 +66,43 @@
           </el-table>
         </div>
       </el-tab-pane>
+      <el-tab-pane label="预算与费用" name="budget">
+        <div class="budgetCenter">
+          <p>设置上限只会保存预算规则，不会授权或启动真实模型调用。</p>
+          <el-form labelPosition="top" @submit.prevent="saveBudget">
+            <div class="budgetFields">
+              <el-form-item label="范围">
+                <el-select v-model="budgetScope"><el-option label="全部项目" value="global" /><el-option label="当前故事" value="project" /></el-select>
+              </el-form-item>
+              <el-form-item v-if="budgetScope === 'project'" label="故事">
+                <el-select v-model="budgetProjectId" placeholder="选择故事">
+                  <el-option v-for="story in stories" :key="story.id" :label="story.title" :value="story.id" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="上限金额"><el-input v-model="budgetLimit" placeholder="如 100.00；0 表示停止新增付费任务" /></el-form-item>
+              <el-form-item label="币种"><el-input v-model="budgetCurrency" maxlength="3" /></el-form-item>
+              <el-form-item label="预警阈值 (%)"><el-input-number v-model="budgetWarningPercent" :min="1" :max="100" controlsPosition="right" /></el-form-item>
+            </div>
+            <div class="budgetActions"><el-button type="primary" :loading="savingBudget" @click="saveBudget">保存预算上限</el-button></div>
+          </el-form>
+          <div class="sectionHeading"><h3>当前使用情况</h3><el-button :loading="loadingBudget" @click="loadBudget">刷新</el-button></div>
+          <div v-loading="loadingBudget" class="budgetSummary">
+            <p v-if="budgetScope === 'project' && !budgetProjectId">请选择故事查看预算。</p>
+            <p v-else-if="!selectedBudget?.configured">{{ budgetScope === 'global' ? '尚未设置全局预算；付费生产请求将被拦截。' : '尚未设置单故事上限；全局预算仍然生效。' }}</p>
+            <template v-else>
+              <p>上限：{{ formatMoney(selectedBudget.limitMicros, selectedBudget.currency) }}</p>
+              <p>已结算：{{ formatMoney(selectedBudget.chargedMicros, selectedBudget.currency) }}；在途预留：{{ formatMoney(selectedBudget.reservedMicros, selectedBudget.currency) }}</p>
+              <p>已占用：{{ formatMoney(selectedBudget.usedMicros, selectedBudget.currency) }}；预警阈值：{{ selectedBudget.warningBasisPoints / 100 }}%</p>
+            </template>
+          </div>
+          <h3>修改记录</h3>
+          <el-table :data="selectedBudgetHistory" maxHeight="190" emptyText="尚无预算变更">
+            <el-table-column label="时间" minWidth="160"><template #default="{ row }">{{ new Date(row.changedAt).toLocaleString() }}</template></el-table-column>
+            <el-table-column label="新上限" minWidth="160"><template #default="{ row }">{{ formatMoney(row.limitMicros, row.currency) }}</template></el-table-column>
+            <el-table-column label="预警阈值" minWidth="100"><template #default="{ row }">{{ row.warningBasisPoints / 100 }}%</template></el-table-column>
+          </el-table>
+        </div>
+      </el-tab-pane>
     </el-tabs>
   </el-dialog>
 </template>
@@ -73,8 +110,8 @@
 <script setup lang="ts">
 import axios from "axios";
 import { ElMessage } from "element-plus";
-import { ref, watch } from "vue";
-import productionApi, { type PriceRule, type SourceKind, type Story, type StoryDetail } from "@/lib/productionApi";
+import { computed, ref, watch } from "vue";
+import productionApi, { type BudgetOverview, type PriceRule, type SourceKind, type Story, type StoryDetail } from "@/lib/productionApi";
 
 const props = defineProps<{ directory: string }>();
 const visible = defineModel<boolean>({ required: true });
@@ -97,13 +134,26 @@ const priceUnitSize = ref(1);
 const priceAmount = ref("");
 const priceCurrency = ref("CNY");
 const priceSourceUrl = ref("");
+const budgetScope = ref<"global" | "project">("global");
+const budgetProjectId = ref("");
+const budgetLimit = ref("");
+const budgetCurrency = ref("CNY");
+const budgetWarningPercent = ref(90);
+const budgetOverview = ref<BudgetOverview | null>(null);
+const loadingBudget = ref(false);
+const savingBudget = ref(false);
+const selectedBudget = computed(() => budgetScope.value === "global" ? budgetOverview.value?.global : budgetOverview.value?.project);
+const selectedBudgetHistory = computed(() => budgetScope.value === "global"
+  ? budgetOverview.value?.globalHistory ?? [] : budgetOverview.value?.projectHistory ?? []);
 
 watch([visible, () => props.directory], ([open]) => {
   selectedStory.value = null;
   stories.value = [];
   priceRules.value = [];
-  if (open && props.directory) { void loadStories(); void loadPriceRules(); }
+  budgetOverview.value = null;
+  if (open && props.directory) { void loadStories(); void loadPriceRules(); void loadBudget(); }
 });
+watch([budgetScope, budgetProjectId], () => { if (visible.value) void loadBudget(); });
 
 function sourceKindLabel(kind: SourceKind) {
   return { synopsis: "故事梗概", novel: "小说", script: "剧本" }[kind];
@@ -179,7 +229,7 @@ async function importStory() {
   }
 }
 
-function priceMicros(value: string) {
+function moneyMicros(value: string) {
   if (!/^(?:0|[1-9]\d{0,8})(?:\.\d{1,6})?$/.test(value)) throw new Error("价格需为非负数字，最多 6 位小数");
   const [whole, fraction = ""] = value.split(".");
   return Number(whole) * 1_000_000 + Number(fraction.padEnd(6, "0"));
@@ -187,6 +237,10 @@ function priceMicros(value: string) {
 
 function formatPrice(rule: PriceRule) {
   return `${(rule.unitPriceMicros / 1_000_000).toFixed(6)} ${rule.currency} / ${rule.unitSize} ${rule.unit}`;
+}
+
+function formatMoney(micros: number, currency: string | null) {
+  return `${(micros / 1_000_000).toFixed(6)} ${currency ?? ""}`.trim();
 }
 
 async function loadPriceRules() {
@@ -208,7 +262,7 @@ async function recordPriceRule() {
   try {
     await productionApi.recordPriceRule(directory, {
       provider: priceProvider.value.trim(), modelId: priceModel.value.trim(), unit: priceUnit.value.trim(),
-      unitSize: priceUnitSize.value, unitPriceMicros: priceMicros(priceAmount.value.trim()),
+      unitSize: priceUnitSize.value, unitPriceMicros: moneyMicros(priceAmount.value.trim()),
       currency: priceCurrency.value.trim().toUpperCase(), sourceUrl: priceSourceUrl.value.trim(), effectiveAt: Date.now(),
     });
     if (props.directory !== directory) return;
@@ -217,6 +271,39 @@ async function recordPriceRule() {
   } catch (cause) {
     ElMessage.error(errorMessage(cause));
   } finally { savingPrice.value = false; }
+}
+
+async function loadBudget() {
+  const directory = props.directory;
+  const projectId = budgetScope.value === "project" ? budgetProjectId.value : "";
+  if (!directory || budgetScope.value === "project" && !projectId) { budgetOverview.value = null; return; }
+  loadingBudget.value = true;
+  try {
+    const result = await productionApi.getBudget(directory, projectId || undefined);
+    if (props.directory === directory && (budgetScope.value !== "project" || budgetProjectId.value === projectId)) {
+      budgetOverview.value = result;
+    }
+  } catch (cause) {
+    ElMessage.error(errorMessage(cause));
+  } finally { loadingBudget.value = false; }
+}
+
+async function saveBudget() {
+  const directory = props.directory;
+  if (!directory || savingBudget.value) return;
+  if (budgetScope.value === "project" && !budgetProjectId.value) { ElMessage.warning("请先选择故事"); return; }
+  savingBudget.value = true;
+  try {
+    await productionApi.setBudget(directory, { scopeType: budgetScope.value,
+      projectId: budgetScope.value === "project" ? budgetProjectId.value : undefined,
+      limitMicros: moneyMicros(budgetLimit.value.trim()), currency: budgetCurrency.value.trim().toUpperCase(),
+      warningBasisPoints: budgetWarningPercent.value * 100 });
+    if (props.directory !== directory) return;
+    await loadBudget();
+    ElMessage.success("预算上限已保存");
+  } catch (cause) {
+    ElMessage.error(errorMessage(cause));
+  } finally { savingBudget.value = false; }
 }
 </script>
 
@@ -252,4 +339,12 @@ async function recordPriceRule() {
   .sectionHeading { display: flex; align-items: center; justify-content: space-between; }
 }
 @media (max-width: 680px) { .priceCenter .priceFields { grid-template-columns: 1fr; } }
+.budgetCenter {
+  p { color: var(--el-text-color-secondary); font-size: 13px; }
+  .budgetFields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 12px; }
+  .budgetActions { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+  .sectionHeading { display: flex; align-items: center; justify-content: space-between; }
+  .budgetSummary { min-height: 84px; }
+}
+@media (max-width: 680px) { .budgetCenter .budgetFields { grid-template-columns: 1fr; } }
 </style>

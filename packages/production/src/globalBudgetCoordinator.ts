@@ -9,6 +9,9 @@ export type PriceRule = {
 };
 
 export type PriceRuleInput = Omit<PriceRule, "id" | "createdAt">;
+export type BudgetChange = { id: string; scopeType: BudgetScopeType; scopeKey: string;
+  previousLimitMicros: number | null; previousCurrency: string | null; previousWarningBasisPoints: number | null;
+  limitMicros: number; currency: string; warningBasisPoints: number; recordedBy: string; changedAt: number };
 
 type Usage = {
   configured: boolean; scope: BudgetScope; currency: string | null; limitMicros: number;
@@ -33,6 +36,20 @@ export class GlobalBudgetCoordinator {
         updated_at INTEGER NOT NULL,
         PRIMARY KEY (scope_type, scope_key)
       );
+      CREATE TABLE IF NOT EXISTS global_budget_change (
+        id TEXT PRIMARY KEY,
+        scope_type TEXT NOT NULL,
+        scope_key TEXT NOT NULL,
+        previous_limit_micros INTEGER,
+        previous_currency TEXT,
+        previous_warning_basis_points INTEGER,
+        limit_micros INTEGER NOT NULL,
+        currency TEXT NOT NULL,
+        warning_basis_points INTEGER NOT NULL,
+        recorded_by TEXT NOT NULL,
+        changed_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS global_budget_change_scope ON global_budget_change(scope_type, scope_key, changed_at DESC);
       CREATE TABLE IF NOT EXISTS global_task_reservation (
         task_id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
@@ -81,6 +98,8 @@ export class GlobalBudgetCoordinator {
     db.query(`INSERT INTO global_schema_migration(version, applied_at) VALUES (1, ?)
       ON CONFLICT(version) DO NOTHING`).run(Date.now());
     db.query(`INSERT INTO global_schema_migration(version, applied_at) VALUES (2, ?)
+      ON CONFLICT(version) DO NOTHING`).run(Date.now());
+    db.query(`INSERT INTO global_schema_migration(version, applied_at) VALUES (3, ?)
       ON CONFLICT(version) DO NOTHING`).run(Date.now());
   }
 
@@ -143,7 +162,7 @@ export class GlobalBudgetCoordinator {
     catch (error) { this.db.exec("ROLLBACK TO globalBudget; RELEASE globalBudget"); throw error; }
   }
 
-  setBudget(scope: BudgetScope, limitMicros: number, currency: string, warningBasisPoints = 9000) {
+  setBudget(scope: BudgetScope, limitMicros: number, currency: string, warningBasisPoints = 9000, recordedBy = "system") {
     if (!( ["global", "project", "daily", "model"] as BudgetScopeType[]).includes(scope.type)) {
       throw new TypeError("Episode budgets belong in the project database.");
     }
@@ -154,11 +173,33 @@ export class GlobalBudgetCoordinator {
     if (!Number.isInteger(warningBasisPoints) || warningBasisPoints < 1 || warningBasisPoints > 10000) {
       throw new RangeError("Warning threshold must be between 1 and 10000 basis points.");
     }
-    this.atomic(() => this.db.query(`INSERT INTO global_budget_rule(scope_type, scope_key, limit_micros, currency,
-      warning_basis_points, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(scope_type, scope_key) DO UPDATE SET
-      limit_micros = excluded.limit_micros, currency = excluded.currency,
-      warning_basis_points = excluded.warning_basis_points, updated_at = excluded.updated_at`)
-      .run(scope.type, scope.key, limitMicros, currency, warningBasisPoints, Date.now()));
+    if (!recordedBy.trim()) throw new TypeError("Budget change author is required.");
+    this.atomic(() => {
+      const previous = this.db.query(`SELECT limit_micros AS limitMicros, currency,
+        warning_basis_points AS warningBasisPoints FROM global_budget_rule WHERE scope_type = ? AND scope_key = ?`)
+        .get(scope.type, scope.key) as { limitMicros: number; currency: string; warningBasisPoints: number } | null;
+      const now = Date.now();
+      this.db.query(`INSERT INTO global_budget_rule(scope_type, scope_key, limit_micros, currency,
+        warning_basis_points, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(scope_type, scope_key) DO UPDATE SET
+        limit_micros = excluded.limit_micros, currency = excluded.currency,
+        warning_basis_points = excluded.warning_basis_points, updated_at = excluded.updated_at`)
+        .run(scope.type, scope.key, limitMicros, currency, warningBasisPoints, now);
+      this.db.query(`INSERT INTO global_budget_change(id, scope_type, scope_key, previous_limit_micros,
+        previous_currency, previous_warning_basis_points, limit_micros, currency,
+        warning_basis_points, recorded_by, changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(randomUUID(), scope.type, scope.key, previous?.limitMicros ?? null, previous?.currency ?? null,
+          previous?.warningBasisPoints ?? null, limitMicros, currency, warningBasisPoints, recordedBy.trim(), now);
+    });
+  }
+
+  listBudgetHistory(scope: BudgetScope, limit = 20): BudgetChange[] {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new RangeError("Budget history limit must be between 1 and 100.");
+    return this.db.query(`SELECT id, scope_type AS scopeType, scope_key AS scopeKey,
+      previous_limit_micros AS previousLimitMicros, previous_currency AS previousCurrency,
+      previous_warning_basis_points AS previousWarningBasisPoints, limit_micros AS limitMicros,
+      currency, warning_basis_points AS warningBasisPoints, recorded_by AS recordedBy,
+      changed_at AS changedAt FROM global_budget_change WHERE scope_type = ? AND scope_key = ?
+      ORDER BY changed_at DESC, id DESC LIMIT ?`).all(scope.type, scope.key, limit) as BudgetChange[];
   }
 
   private usage(scope: BudgetScope, currency?: string): Usage {

@@ -6,6 +6,13 @@ export type StoryDetail = Story & { sourceText: string };
 export type PriceRule = { id: string; provider: string; modelId: string; unit: string; unitSize: number;
   unitPriceMicros: number; currency: string; sourceUrl: string; effectiveAt: number; recordedBy: string; createdAt: number };
 export type PriceRuleInput = Pick<PriceRule, "provider" | "modelId" | "unit" | "unitSize" | "unitPriceMicros" | "currency" | "sourceUrl" | "effectiveAt">;
+export type BudgetUsage = { configured: boolean; scope: { type: string; key: string }; currency: string | null;
+  limitMicros: number; warningBasisPoints: number; chargedMicros: number; reservedMicros: number; usedMicros: number };
+export type BudgetChange = { id: string; scopeType: string; scopeKey: string; previousLimitMicros: number | null;
+  previousCurrency: string | null; previousWarningBasisPoints: number | null; limitMicros: number;
+  currency: string; warningBasisPoints: number; recordedBy: string; changedAt: number };
+export type BudgetOverview = { global: BudgetUsage; globalHistory: BudgetChange[];
+  project: BudgetUsage | null; projectHistory: BudgetChange[] };
 
 const client = axios.create({ baseURL: "/api/production", headers: { "x-toonflow-workspace": "1" } });
 
@@ -29,6 +36,15 @@ const productionApi = {
   async recordPriceRule(directory: string, input: PriceRuleInput) {
     const { data } = await client.post<{ data: { rule: PriceRule } }>("/recordPriceRule", { directory, ...input });
     return data.data.rule;
+  },
+  async getBudget(directory: string, projectId?: string) {
+    const { data } = await client.get<{ data: BudgetOverview }>("/getBudget", { params: { directory, projectId } });
+    return data.data;
+  },
+  async setBudget(directory: string, input: { scopeType: "global" | "project"; projectId?: string;
+    limitMicros: number; currency: string; warningBasisPoints: number }) {
+    const { data } = await client.post<{ data: { usage: BudgetUsage } }>("/setBudget", { directory, ...input });
+    return data.data.usage;
   },
 };
 
