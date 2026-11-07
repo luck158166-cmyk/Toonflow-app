@@ -3,6 +3,9 @@ import axios from "axios";
 export type SourceKind = "synopsis" | "novel" | "script";
 export type Story = { id: string; title: string; sourceKind: SourceKind; workflowState: string; createdAt: number; updatedAt: number };
 export type StoryDetail = Story & { sourceText: string };
+export type StorySummary = { id: string; title: string; sourceKind: SourceKind; description: string;
+  chapterCount: number; episodeCount: number; characterCount: number; sceneCount: number;
+  propCount: number; shotCount: number; updatedAt: number };
 export type Episode = { id: string; projectId: string; episodeNumber: number; title: string; logline: string;
   reviewState: string; createdAt: number; updatedAt: number; shotCount?: number };
 export type EpisodeCost = { episode: Episode; breakdown: Array<{ shotId: string | null; stage: string;
@@ -52,6 +55,10 @@ export type BudgetOverview = { global: BudgetUsage; globalHistory: BudgetChange[
 const client = axios.create({ baseURL: "/api/production", headers: { "x-toonflow-workspace": "1" } });
 
 const productionApi = {
+  async listStorySummaries(directory: string) {
+    const { data } = await client.get<{ data: { stories: StorySummary[] } }>("/listStorySummaries", { params: { directory } });
+    return data.data.stories;
+  },
   async listStories(directory: string) {
     const { data } = await client.get<{ data: { stories: Story[] } }>("/listStories", { params: { directory } });
     return data.data.stories;

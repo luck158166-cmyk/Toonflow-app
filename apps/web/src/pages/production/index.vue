@@ -4,9 +4,15 @@
       <div class="brandBlock"><span class="brandMark">映</span><div><strong>Toonflow Studio</strong><small>短剧生产工作台</small></div></div>
       <div class="projectBlock"><span>当前工作区</span><strong :title="directory">{{ workspaceStore.project?.name }}</strong></div>
       <nav class="stageNav" aria-label="生产流程">
-        <button v-for="item in navigation" :key="item.key" type="button" :class="{ active: activeStage === item.key }" @click="activeStage = item.key">
+        <button v-for="item in navigation.filter(entry => entry.key === 'overview' || entry.key === 'exports')" :key="item.key" type="button" :class="{ active: activeStage === item.key }" @click="activeStage = item.key">
           <component :is="item.icon" :size="17" aria-hidden="true" /><span>{{ item.label }}</span><span v-if="item.count !== undefined" class="stageCount">{{ item.count }}</span>
         </button>
+        <details class="advancedNav" :open="activeStage !== 'overview' && activeStage !== 'exports'">
+          <summary>制作资料与设置</summary>
+          <button v-for="item in navigation.filter(entry => entry.key !== 'overview' && entry.key !== 'exports')" :key="item.key" type="button" :class="{ active: activeStage === item.key }" @click="activeStage = item.key">
+            <component :is="item.icon" :size="17" aria-hidden="true" /><span>{{ item.label }}</span><span v-if="item.count !== undefined" class="stageCount">{{ item.count }}</span>
+          </button>
+        </details>
       </nav>
       <div class="railFooter">
         <el-button text @click="router.push('/workspace')">打开画布精修</el-button>
@@ -19,7 +25,7 @@
         <div class="topActions"><span class="safeState">真实模型调用未授权</span><el-button class="mobileLink" text @click="router.push('/workspace')">画布</el-button><el-button class="mobileLink" text @click="router.push('/home')">项目</el-button><el-button :loading="loading" @click="refresh">刷新资料</el-button></div>
       </header>
       <div class="pageBody" v-loading="loading">
-        <dashboard v-if="activeStage === 'overview'" :project="project" :storyCount="stories.length" :budget="budget" @openStage="activeStage = $event" />
+        <dashboard v-if="activeStage === 'overview'" v-model:storyTitle="storyTitle" v-model:storyText="storyText" :project="project" :storyCount="stories.length" :budget="budget" :savingStory="savingStory" @openStage="activeStage = $event" @importNovel="importNovel" @fileChange="readStoryFile" />
 
         <template v-else-if="activeStage === 'stories'">
           <div class="sectionHeading"><div><h2>故事资料</h2><p>原文保留在当前工作区，后续分析以它为依据。</p></div><el-button @click="loadStories">刷新故事</el-button></div>
@@ -77,7 +83,7 @@
 import axios from "axios";
 import { ElMessage } from "element-plus";
 import { computed, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { IconBook2, IconBox, IconChartBar, IconChecklist, IconClipboardText, IconHome, IconMovie, IconPhotoVideo } from "@tabler/icons-vue";
 import saveFile from "@/lib/saveFile";
 import productionApi, { type BudgetOverview, type PriceRule, type ProjectProduction, type SourceKind, type Story } from "@/lib/productionApi";
@@ -87,6 +93,7 @@ import dashboard from "./dashboard.vue";
 
 type Stage = "overview" | "stories" | "episodes" | "assets" | "shots" | "tasks" | "exports" | "costs";
 const router = useRouter();
+const route = useRoute();
 const workspaceStore = useWorkspaceStore();
 const directory = computed(() => workspaceStore.project?.directory ?? "");
 const activeStage = ref<Stage>("overview");
@@ -118,10 +125,10 @@ const priceUnitSize = ref(1);
 const priceAmount = ref("");
 const priceCurrency = ref("CNY");
 const priceSourceUrl = ref("");
-const stageLabels: Record<Stage, string> = { overview: "项目总览", stories: "故事资料", episodes: "分集剧本", assets: "人物场景道具", shots: "镜头与片段", tasks: "生成任务", exports: "成片管理", costs: "费用与备份" };
+const stageLabels: Record<Stage, string> = { overview: "制作首页", stories: "故事资料", episodes: "分集剧本", assets: "人物场景道具", shots: "镜头与片段", tasks: "生成任务", exports: "成片管理", costs: "费用与备份" };
 const stageTitle = computed(() => stageLabels[activeStage.value]);
 const navigation = computed(() => ([
-  { key: "overview", label: "项目总览", icon: IconHome },
+  { key: "overview", label: "制作首页", icon: IconHome },
   { key: "stories", label: "故事资料", icon: IconBook2, count: stories.value.length },
   { key: "episodes", label: "分集剧本", icon: IconClipboardText, count: project.value?.episodes.length },
   { key: "assets", label: "人物场景道具", icon: IconBox, count: (project.value?.assets.length ?? 0) + (project.value?.scenes.length ?? 0) },
@@ -160,7 +167,10 @@ async function loadStories() {
     const result = await productionApi.listStories(path);
     if (directory.value !== path) return;
     stories.value = result;
-    if (!result.some(story => story.id === selectedStoryId.value)) selectedStoryId.value = result[0]?.id ?? "";
+    if (!result.some(story => story.id === selectedStoryId.value)) {
+      const requestedId = typeof route.query.storyId === "string" ? route.query.storyId : "";
+      selectedStoryId.value = result.find(story => story.id === requestedId)?.id ?? result[0]?.id ?? "";
+    }
   } catch (cause) { ElMessage.error(errorMessage(cause)); }
   finally { loading.value = false; }
 }
@@ -196,11 +206,12 @@ async function importStory() {
   try {
     const projectId = await productionApi.importStory(directory.value, storyTitle.value.trim(), sourceKind.value, storyText.value);
     storyTitle.value = ""; storyText.value = "";
-    await loadStories(); selectedStoryId.value = projectId;
+    await loadStories(); selectedStoryId.value = projectId; await refreshProject();
     ElMessage.success("故事已导入");
   } catch (cause) { ElMessage.error(errorMessage(cause)); }
   finally { savingStory.value = false; }
 }
+async function importNovel() { sourceKind.value = "novel"; await importStory(); }
 async function loadBudget() {
   const path = directory.value;
   if (!path) return;
@@ -264,6 +275,7 @@ async function exportBackup() {
   .brandMark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: linear-gradient(135deg, #29b4ef, #627bfa); color: white; font-weight: 700; box-shadow: 0 5px 13px #1788ed38; }
   .projectBlock { display: grid; gap: 5px; padding: 12px 14px; border: 1px solid var(--el-border-color-light); border-radius: 10px; span { color: var(--el-text-color-secondary); font-size: 11px; } strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; } }
   .stageNav { display: grid; gap: 3px; margin-top: 24px; button { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 43px; padding: 0 12px; border: 0; border-radius: 9px; color: var(--el-text-color-regular); background: transparent; text-align: left; cursor: pointer; &.active { color: #0873c9; background: #e5f3ff; font-weight: 700; } &:hover { background: var(--el-fill-color-light); } } .stageCount { margin-left: auto; color: var(--el-text-color-secondary); font-size: 11px; } }
+  .advancedNav { margin-top: 11px; padding-top: 12px; border-top: 1px solid #e3ebf4; summary { padding: 10px 12px; color: #697b8f; font-size: 12px; cursor: pointer; } button { min-height: 39px; margin-top: 3px; padding-left: 18px; font-size: 12px; } }
   .railFooter { display: grid; gap: 4px; margin-top: auto; padding-top: 16px; border-top: 1px solid var(--el-border-color-light); .el-button { justify-content: flex-start; margin: 0; } }
 }
 .mainArea { min-width: 0; overflow: hidden; }

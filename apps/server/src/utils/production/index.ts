@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { dirname, resolve } from "node:path";
 import { lstat, mkdir, realpath } from "@toonflow/file";
-import { ProductionCatalog, ProductionStore } from "@toonflow/production";
+import { ProductionCatalog, ProductionStore, indexNovel } from "@toonflow/production";
 export { createProjectBackup } from "./projectBackup";
 
 async function prepareDirectory(parent: string, name: string) {
@@ -21,6 +21,52 @@ async function checkDatabaseFile(path: string) {
   if (info && (!info.isFile() || info.isSymbolicLink())) {
     throw Object.assign(new Error("生产数据库必须是普通文件"), { status: 403 });
   }
+}
+
+export type ProductionSummary = {
+  id: string; title: string; sourceKind: "synopsis" | "novel" | "script"; description: string;
+  chapterCount: number; episodeCount: number; characterCount: number; sceneCount: number;
+  propCount: number; shotCount: number; updatedAt: number;
+};
+
+/** Read existing local production data without creating a database just by listing projects. */
+export async function listProductionSummaries(workspaceDirectory: string): Promise<ProductionSummary[]> {
+  const folder = resolve(workspaceDirectory, ".production");
+  const folderInfo = await lstat(folder).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  if (!folderInfo) return [];
+  if (!folderInfo.isDirectory() || folderInfo.isSymbolicLink()) {
+    throw Object.assign(new Error("生产数据目录必须是普通文件夹"), { status: 403 });
+  }
+  const path = resolve(folder, "production.db");
+  const fileInfo = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  if (!fileInfo) return [];
+  await checkDatabaseFile(path);
+  const db = new Database(path, { readonly: true });
+  try {
+    const table = db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'production_project'").get();
+    if (!table) return [];
+    const rows = db.query(`SELECT p.id, p.title, p.source_kind AS sourceKind, p.source_text AS sourceText,
+      p.updated_at AS updatedAt,
+      (SELECT COUNT(*) FROM production_episode e WHERE e.project_id = p.id) AS episodeCount,
+      (SELECT COUNT(*) FROM production_asset a WHERE a.project_id = p.id AND a.kind = 'character') AS characterCount,
+      (SELECT COUNT(*) FROM production_asset a WHERE a.project_id = p.id AND a.kind = 'prop') AS propCount,
+      (SELECT COUNT(*) FROM production_scene s WHERE s.project_id = p.id) AS sceneCount,
+      (SELECT COUNT(*) FROM production_shot s WHERE s.project_id = p.id) AS shotCount
+      FROM production_project p ORDER BY p.updated_at DESC, p.id DESC`).all() as Array<{
+        id: string; title: string; sourceKind: ProductionSummary["sourceKind"]; sourceText: string;
+        updatedAt: number; episodeCount: number; characterCount: number; propCount: number;
+        sceneCount: number; shotCount: number;
+      }>;
+    return rows.map(({ sourceText, ...row }) => ({ ...row,
+      description: sourceText.replace(/\s+/gu, " ").trim().slice(0, 100),
+      chapterCount: row.sourceKind === "novel" ? indexNovel(sourceText).chapters.length : 0 }));
+  } finally { db.close(); }
 }
 
 const recoveredDataDirectories = new Set<string>();
