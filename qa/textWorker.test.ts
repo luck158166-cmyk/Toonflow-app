@@ -1,7 +1,8 @@
 import { expect, it } from "bun:test";
 import { Database } from "bun:sqlite";
+import { createHash } from "node:crypto";
 import { ProductionStore, type TaskInput } from "../packages/production/src/store";
-import { runTextTask } from "../packages/production/src/textWorker";
+import { runTextTask, runPricedTextTask } from "../packages/production/src/textWorker";
 
 const input: TaskInput = { idempotencyKey: "draft1", projectId: "story", episodeId: "plannedEpisode1",
   stage: "text", provider: "mock", modelId: "mock", requestJson: '{"source":"chapter"}',
@@ -12,12 +13,18 @@ it("blocks text generation without budget, persists one response and keeps unkno
   const db = new Database(":memory:");
   try {
     const store = new ProductionStore(db);
-    const task = store.createTask(input).task;
+    const rule = store.globalBudgets.recordPriceRule({ provider: "mock", modelId: "mock", unit: "textTokenCeiling",
+      unitSize: 1, unitPriceMicros: 1, currency: "CNY", sourceUrl: "https://example.test/price", effectiveAt: 1, recordedBy: "qa" });
+    const authorization = { approvedRequestHash: createHash("sha256").update(input.requestJson).digest("hex"),
+      approvedPlanHash: "a".repeat(64), priceRuleId: rule.id, maxCalls: 1 as const, maxCostMicros: 100, currency: "CNY" as const, maxOutputTokens: 10,
+      destination: "https://example.test/model", contextWindow: 100, maxOutputTokensLimit: 50 };
+    const priced = { ...input, unit: "textTokenCeiling", quantity: 100 };
     let calls = 0;
     const provider = { providerId: "mock", async generate() { calls++; return output; } };
-    await expect(runTextTask(store, task.id, provider)).rejects.toThrow("global budget");
+    await expect(runPricedTextTask(store, priced, authorization, provider)).rejects.toThrow("global budget");
     store.setBudget(0, "CNY");
-    expect((await runTextTask(store, task.id, provider)).status).toBe("budget_exhausted");
+    expect((await runPricedTextTask(store, priced, authorization, provider)).status).toBe("budget_exhausted");
+    const task = store.findTaskByIdempotencyKey(input.idempotencyKey)!;
     expect(calls).toBe(0);
     store.setBudget(1000, "CNY");
     expect((await runTextTask(store, task.id, provider)).status).toBe("succeeded");

@@ -3,7 +3,7 @@ import { applyEpisodeDraft, type EpisodeDraft, type ProductionCatalog } from "./
 import { buildAdaptationInput, type AdaptationOptions } from "./adaptationInput";
 import type { ProductionStore, PricedTaskInput } from "./store";
 
-function readInput(catalog: ProductionCatalog, projectId: string, inputId: string) {
+export function readAdaptationInput(catalog: ProductionCatalog, projectId: string, inputId: string) {
   const row = catalog.db.query(`SELECT request_json AS requestJson FROM adaptation_input WHERE id = ? AND project_id = ?`)
     .get(inputId, projectId) as { requestJson: string } | null;
   if (!row || createHash("sha256").update(row.requestJson).digest("hex") !== inputId) throw new Error("编剧输入不存在或已被改动");
@@ -11,23 +11,27 @@ function readInput(catalog: ProductionCatalog, projectId: string, inputId: strin
   return { ...row, ...request };
 }
 
+export function adaptationTaskKey(projectId: string, inputId: string, provider: string, modelId: string) {
+  return createHash("sha256").update(JSON.stringify(["adaptation.v1", projectId, inputId, provider, modelId])).digest("hex");
+}
+
 /** Caller supplies confirmed pricing/authorization; this builder never dispatches or spends. */
 export function buildAdaptationTask(catalog: ProductionCatalog, projectId: string, inputId: string,
   provider: string, modelId: string): Omit<PricedTaskInput, "unit" | "quantity"> {
   if (!provider.trim() || !modelId.trim()) throw new Error("编剧供应商与模型不能为空");
-  const input = readInput(catalog, projectId, inputId);
+  const input = readAdaptationInput(catalog, projectId, inputId);
   if (buildAdaptationInput(catalog, projectId, input.options, input.responseSchema).id !== inputId) {
     throw new Error("原文或连续性资料已变更，请重新准备编剧输入");
   }
   return { projectId, episodeId: `adaptation:${input.options.episodeNumber}`, stage: "text", provider, modelId,
     requestJson: input.requestJson,
-    idempotencyKey: createHash("sha256").update(JSON.stringify(["adaptation.v1", projectId, inputId, provider, modelId])).digest("hex") };
+    idempotencyKey: adaptationTaskKey(projectId, inputId, provider, modelId) };
 }
 
 /** Adoption receipt and episode writes commit together, independently of the immutable model response. */
 export function adoptAdaptationResponse(catalog: ProductionCatalog, store: ProductionStore,
   projectId: string, inputId: string, taskId: string, parseDraft: (value: unknown) => EpisodeDraft) {
-  const input = readInput(catalog, projectId, inputId);
+  const input = readAdaptationInput(catalog, projectId, inputId);
   const task = store.getTask(taskId);
   if (task.projectId !== projectId || task.stage !== "text" || task.state !== "succeeded"
     || task.episodeId !== `adaptation:${input.options.episodeNumber}` || task.requestJson !== input.requestJson) {

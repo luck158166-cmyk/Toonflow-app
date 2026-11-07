@@ -148,6 +148,7 @@ export function streamAi(
   context: Context,
   signal: AbortSignal,
   references: Awaited<ReturnType<typeof readAiReferences>> = [],
+  productionPolicy?: { maxOutputTokens: number },
 ) {
   const { provider, model: configuredModel, baseUrl } = configured;
   const model: Model<typeof provider.protocol> = {
@@ -158,8 +159,13 @@ export function streamAi(
     maxTokens: configuredModel.maxOutputTokens,
   };
   const usageTracker = createBillingUsageTracker(provider.protocol);
+  let productionRequests = 0;
+  const request = productionPolicy ? Object.assign((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    if (productionRequests++ > 0) throw new Error("本次编剧授权仅允许一次网络请求，禁止隐式重试");
+    return globalThis.fetch(input, { ...init, redirect: "error" });
+  }, globalThis.fetch) : globalThis.fetch;
   const files = createFileTransport({ ...provider, apiUrl: baseUrl }, {
-    signal, ...(configured.route ? { fetch: usageTracker.fetch(globalThis.fetch) } : {}),
+    signal, ...(configured.route || productionPolicy ? { fetch: usageTracker.fetch(request) } : {}),
   });
   const requestContext = configured.route ? {
     ...context,
@@ -173,9 +179,9 @@ export function streamAi(
     apiKey: provider.apiKey,
     headers: provider.headers,
     signal,
-    ...(configured.route ? { maxTokens: configuredModel.maxOutputTokens } : {}),
+    ...(productionPolicy ? { maxTokens: productionPolicy.maxOutputTokens } : configured.route ? { maxTokens: configuredModel.maxOutputTokens } : {}),
     // 此入口没有 AgentSession，仅重试尚未交付响应的请求，已输出的流不能直接拼接重放。
-    maxRetries: configured.route ? 0 : 3,
+    maxRetries: configured.route || productionPolicy ? 0 : 3,
     fetch: Object.assign((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
       if (!configured.execution) requireDirectModelAccess();
       return files.fetch(input, init);

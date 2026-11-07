@@ -5,7 +5,7 @@
       <div class="introActions"><button class="softButton" type="button" @click="emit('openStage', 'costs')"><icon-wallet :size="16" />{{ budgetLabel }}</button><button class="primaryButton autoButton" type="button" disabled aria-describedby="automationStatus"><icon-sparkles :size="18" />一键自动制作<span>待开放</span></button></div>
     </header>
     <section class="productionTrack" aria-label="制作流程">
-      <div class="trackHeading"><strong><icon-route :size="18" />制作进度</strong><span id="automationStatus">自动出片链路正在接入，当前可保存章节、查看和管理制作资料。</span></div>
+      <div class="trackHeading"><strong><icon-route :size="18" />制作进度</strong><span id="automationStatus">可在分集工作台授权生成剧本，整片自动生产仍在接入。</span></div>
       <div class="workflow"><button v-for="(step, index) in workflow" :key="step.label" type="button" class="workflowStep" :class="{ ready: step.ready }" @click="emit('openStage', step.stage)"><span class="stepIndex"><icon-check v-if="step.ready" :size="16" /><template v-else>{{ String(index + 1).padStart(2, '0') }}</template></span><span class="stepText"><b>{{ step.label }}</b><small>{{ step.status }}</small></span><icon-chevron-right v-if="index < workflow.length - 1" class="stepArrow" :size="16" /></button></div>
     </section>
     <div v-if="attentionTasks || pendingReview" class="attentionBanner"><icon-info-circle :size="18" /><span>{{ attentionTasks ? `${attentionTasks} 个任务需要处理` : `${pendingReview} 个镜头待确认` }}</span><button type="button" @click="emit('openStage', attentionTasks ? 'tasks' : 'shots')">查看详情 →</button></div>

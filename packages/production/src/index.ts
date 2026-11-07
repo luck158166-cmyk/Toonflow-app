@@ -2,6 +2,7 @@ export * from "./catalog";
 export * from "./novelAdaptation";
 export * from "./adaptationInput";
 export * from "./adaptationTask";
+export * from "./adaptationExecution";
 export * from "./store";
 export * from "./globalBudgetCoordinator";
 export * from "./dispatcher";

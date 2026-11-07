@@ -3,6 +3,9 @@ import { dirname, resolve } from "node:path";
 import { lstat, mkdir, realpath } from "@toonflow/file";
 import { ProductionCatalog, ProductionStore, indexNovel } from "@toonflow/production";
 export { createProjectBackup } from "./projectBackup";
+export async function createProductionTextProvider(providerId: string, modelId: string, maxOutputTokens: number) {
+  return (await import("./textProvider")).createProductionTextProvider(providerId, modelId, maxOutputTokens);
+}
 
 async function prepareDirectory(parent: string, name: string) {
   const path = resolve(parent, name);

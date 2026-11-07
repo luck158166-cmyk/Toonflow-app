@@ -71,6 +71,9 @@ export type CreateTaskResult = { task: Task; created: boolean };
 export type PricedTaskInput = Omit<TaskInput, "estimatedCostMicros" | "currency" | "billable"> & {
   unit: string; quantity: number;
 };
+export type TextTaskAuthorization = { approvedRequestHash: string; approvedPlanHash: string; priceRuleId: string;
+  maxCalls: 1; maxCostMicros: number; currency: "CNY"; maxOutputTokens: number;
+  destination: string; contextWindow: number; maxOutputTokensLimit: number };
 export type TaskPriceSnapshot = {
   taskId: string; priceRuleId: string; unit: string; unitSize: number; unitPriceMicros: number;
   quantity: number; currency: string; estimatedCostMicros: number; sourceUrl: string; quotedAt: number;
@@ -297,6 +300,10 @@ export class ProductionStore {
       response_text TEXT NOT NULL, response_sha256 TEXT NOT NULL,
       provider_request_id TEXT NOT NULL, usage_json TEXT NOT NULL, created_at INTEGER NOT NULL
     );`);
+    db.exec(`CREATE TABLE IF NOT EXISTS text_task_authorization (
+      task_id TEXT PRIMARY KEY REFERENCES generation_task(id), authorization_json TEXT NOT NULL,
+      max_calls INTEGER NOT NULL CHECK(max_calls = 1), created_at INTEGER NOT NULL
+    );`);
     db.query("INSERT INTO schema_migration(version, applied_at) VALUES (1, ?) ON CONFLICT(version) DO NOTHING")
       .run(Date.now());
     db.query("INSERT INTO schema_migration(version, applied_at) VALUES (2, ?) ON CONFLICT(version) DO NOTHING")
@@ -369,7 +376,18 @@ export class ProductionStore {
   }
 
   /** New priced submissions freeze the confirmed rate, quote, and budget reservation together. */
-  createPricedTaskAndBeginSubmission(input: PricedTaskInput): DispatchResult {
+  createPricedTaskAndBeginSubmission(input: PricedTaskInput, authorization?: TextTaskAuthorization): DispatchResult {
+    if (input.stage === "text" && (!authorization || authorization.currency !== "CNY"
+      || authorization.maxCalls !== 1 || !/^[a-f0-9]{64}$/.test(authorization.approvedPlanHash)
+      || !authorization.priceRuleId?.trim()
+      || !authorization.destination?.trim() || authorization.destination.length > 4096
+      || !Number.isSafeInteger(authorization.contextWindow) || authorization.contextWindow < 1
+      || !Number.isSafeInteger(authorization.maxOutputTokensLimit) || authorization.maxOutputTokensLimit < authorization.maxOutputTokens
+      || !Number.isSafeInteger(authorization.maxCostMicros) || authorization.maxCostMicros < 1
+      || !Number.isSafeInteger(authorization.maxOutputTokens) || authorization.maxOutputTokens < 1
+      || authorization.approvedRequestHash !== createHash("sha256").update(input.requestJson).digest("hex"))) {
+      throw new Error("编剧调用必须明确授权本次输入、一次调用和人民币上限");
+    }
     const modelId = input.modelId?.trim() ?? "";
     if (!modelId || !input.unit.trim() || !Number.isSafeInteger(input.quantity) || input.quantity < 1) {
       throw new TypeError("Priced tasks require a model, billing unit, and positive safe-integer quantity.");
@@ -381,6 +399,10 @@ export class ProductionStore {
       const old = this.db.query(`SELECT ${taskColumns} FROM generation_task WHERE idempotency_key = ?`)
         .get(input.idempotencyKey) as TaskRow | null;
       if (old) {
+        if (input.stage === "text") {
+          const saved = this.db.query("SELECT authorization_json AS value FROM text_task_authorization WHERE task_id = ?").get(old.id) as { value: string } | null;
+          if (!saved || stableJson(JSON.parse(saved.value)) !== stableJson(authorization)) throw new Error("本次授权与已保存任务不一致");
+        }
         const snapshot = this.getTaskPriceSnapshot(old.id);
         if (!snapshot || snapshot.unit !== billingUnit || snapshot.quantity !== quantity) {
           throw new Error("Idempotency key reused for a different price request.");
@@ -391,9 +413,15 @@ export class ProductionStore {
       }
       const quotedAt = Date.now();
       const quote = this.globalBudgets.quotePrice(input.provider, modelId, billingUnit, quantity, quotedAt);
+      if (input.stage === "text" && quote.rule.id !== authorization!.priceRuleId) throw new Error("价格已变更，请重新检查费用并授权");
+      if (input.stage === "text" && (quote.currency !== authorization!.currency || quote.amountMicros > authorization!.maxCostMicros)) {
+        throw new Error("编剧费用预估超过本次人民币授权上限");
+      }
       if (quote.amountMicros < 1) throw new Error("Paid model task requires a positive confirmed price.");
       const created = this.createTaskInTransaction({ ...taskInput,
         estimatedCostMicros: quote.amountMicros, currency: quote.currency, billable: true });
+      if (input.stage === "text") this.db.query(`INSERT INTO text_task_authorization(task_id, authorization_json, max_calls, created_at)
+        VALUES (?, ?, 1, ?)`).run(created.task.id, JSON.stringify(authorization), Date.now());
       this.db.query(`INSERT INTO task_price_snapshot(task_id, price_rule_id, unit, unit_size,
         unit_price_micros, quantity, currency, estimated_cost_micros, source_url, quoted_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(created.task.id, quote.rule.id, billingUnit,
@@ -788,6 +816,16 @@ export class ProductionStore {
     if (task.state === "succeeded") return { status: "already_succeeded" as const, task };
     if (task.state !== "queued" || task.requestStarted) return { status: "already_dispatched" as const, task };
 
+    if (task.stage === "text" && task.billable) {
+      const authorization = this.getTextAuthorization(id);
+      const price = this.getTaskPriceSnapshot(id);
+      if (!authorization || !price || authorization.maxCalls !== 1 || authorization.priceRuleId !== price.priceRuleId
+        || authorization.currency !== task.currency || task.estimatedCostMicros > authorization.maxCostMicros
+        || authorization.approvedRequestHash !== createHash("sha256").update(task.requestJson).digest("hex")) {
+        throw new Error("付费编剧任务缺少有效的按次授权和价格快照");
+      }
+    }
+
     let episodeWarning = false;
     if (task.billable) {
       const episodeUsage = this.usageFor({ type: "episode", key: episodeBudgetKey(task.projectId, task.episodeId) }, task.currency);
@@ -945,6 +983,16 @@ export class ProductionStore {
     return this.db.query(`SELECT response_text AS responseText, response_sha256 AS sha256,
       provider_request_id AS providerRequestId, usage_json AS usageJson FROM text_output WHERE task_id = ?`)
       .get(id) as { responseText: string; sha256: string; providerRequestId: string; usageJson: string } | null;
+  }
+
+  findTaskByIdempotencyKey(key: string) {
+    const row = this.db.query(`SELECT ${taskColumns} FROM generation_task WHERE idempotency_key = ?`).get(key) as TaskRow | null;
+    return row ? toTask(row) : null;
+  }
+
+  getTextAuthorization(taskId: string): TextTaskAuthorization | null {
+    const row = this.db.query("SELECT authorization_json AS value FROM text_task_authorization WHERE task_id = ?").get(taskId) as { value: string } | null;
+    return row ? JSON.parse(row.value) : null;
   }
 
   completeTextTask(id: string, output: { responseText: string; providerRequestId: string; usageJson: string }) {

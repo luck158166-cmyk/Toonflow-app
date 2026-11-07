@@ -1,5 +1,10 @@
 import axios from "axios";
 export type AdaptationInputSummary = { id: string; episodeNumber: number; sourceHash: string; templateVersion: string; createdAt: number };
+export type AdaptationRequest = { directory: string; projectId: string; inputId: string; providerId: string; modelId: string; maxOutputTokens: number };
+export type AdaptationPreview = { planHash: string; estimatedCostMicros: number; sourceUrl: string; destination: string;
+  quantity: number; requestJson: string; options: { episodeNumber: number; firstChapter: number; lastChapter: number;
+    targetSeconds: number; genre: string; visualStyle: string } };
+export type ProductionTextModel = { providerId: string; providerLabel: string; modelId: string; label: string; maxOutputTokens: number };
 
 export type SourceKind = "synopsis" | "novel" | "script";
 export type Story = { id: string; title: string; sourceKind: SourceKind; workflowState: string; createdAt: number; updatedAt: number };
@@ -58,6 +63,18 @@ export type BudgetOverview = { global: BudgetUsage; globalHistory: BudgetChange[
 const client = axios.create({ baseURL: "/api/production", headers: { "x-toonflow-workspace": "1" } });
 
 const productionApi = {
+  async listTextModels() {
+    const { data } = await axios.get<{ data: ProductionTextModel[] }>("/api/ai/models");
+    return data.data;
+  },
+  async previewAdaptation(input: AdaptationRequest) {
+    const { data } = await client.post<{ data: AdaptationPreview }>("/previewAdaptation", input);
+    return data.data;
+  },
+  async runAdaptation(input: AdaptationRequest, approval: { approved: true; maxCalls: 1; planHash: string; maxCostMicros: number }) {
+    const { data } = await client.post<{ data: { taskId: string; status: string; episodeId?: string; adoptionError?: string } }>("/runAdaptation", { ...input, approval });
+    return data.data;
+  },
   async adoptTextResult(directory: string, projectId: string, taskId: string) {
     const { data } = await client.post<{ data: { episodeId: string; alreadyAdopted: boolean } }>("/adoptTextResult", { directory, projectId, taskId });
     return data.data;
