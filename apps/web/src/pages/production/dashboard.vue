@@ -1,6 +1,6 @@
 <template>
   <div class="dashboard">
-    <div class="dashboardIntro"><div><span class="kicker">PRODUCTION OVERVIEW</span><h2>{{ project?.story.title || '从你的故事开始' }}</h2><p>{{ project ? `${project.story.sourceText.slice(0, 100)}${project.story.sourceText.length > 100 ? '…' : ''}` : '导入小说、故事梗概或剧本，建立短剧生产资料。' }}</p></div><div class="introFacts"><span>故事 {{ storyCount }}</span><span>分集 {{ project?.episodes.length ?? 0 }}</span><span>镜头 {{ project?.shots.length ?? 0 }}</span><span>{{ budgetLabel }}</span></div></div>
+    <div class="dashboardIntro"><div><span class="kicker">PRODUCTION OVERVIEW</span><h2>{{ project?.story.title || '从你的故事开始' }}</h2><p>{{ project ? `${project.story.sourceText.slice(0, 100)}${project.story.sourceText.length > 100 ? '…' : ''}` : '导入小说、故事梗概或剧本，建立短剧生产资料。' }}</p></div><div class="introTools"><div class="introFacts"><span>故事 {{ storyCount }}</span><span>分集 {{ project?.episodes.length ?? 0 }}</span><span>镜头 {{ project?.shots.length ?? 0 }}</span><span>{{ budgetLabel }}</span></div><button class="introAction" type="button" @click="emit('openStage', project ? 'episodes' : 'stories')">{{ project ? '继续分集创作' : '导入小说章节' }} →</button></div></div>
     <div v-if="attentionTasks" class="attentionBanner"><span>{{ attentionTasks }} 个任务需要失败处理或供应商对账，已成功产物不会自动重新提交。</span><button type="button" @click="emit('openStage', 'tasks')">查看任务 →</button></div>
     <div v-if="pendingReview" class="attentionBanner reviewBanner"><span>{{ pendingReview }} 个镜头尚未完成内容确认。</span><button type="button" @click="emit('openStage', 'shots')">逐镜检查 →</button></div>
     <div class="topGrid">
@@ -44,6 +44,8 @@ const workflow = computed(() => [
 <style scoped lang="scss">
 .dashboard { display: grid; gap: 16px; color: #1d2d42; }
 .dashboardIntro { display: flex; align-items: end; justify-content: space-between; gap: 20px; padding: 6px 2px 12px; h2 { margin: 8px 0; font-size: 25px; } p { max-width: 690px; margin: 0; color: #697b8f; line-height: 1.6; } }
+.introTools { display: grid; justify-items: end; gap: 12px; }
+.introAction { padding: 11px 18px; border: 1px solid #1689ec; border-radius: 8px; color: #fff; background: #1689ec; box-shadow: 0 6px 15px #1689ec30; font-size: 12px; font-weight: 700; cursor: pointer; &:hover { background: #0873c9; } }
 .kicker, .studioPanel .panelHeader small { color: #1689ec; font-size: 10px; font-weight: 700; letter-spacing: .14em; }
 .introFacts { display: flex; gap: 8px; flex-wrap: wrap; span { padding: 7px 10px; border: 1px solid #d7e7f5; border-radius: 7px; color: #4a6a88; background: #fff; font-size: 11px; white-space: nowrap; } }
 .attentionBanner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border: 1px solid #efd7ac; border-radius: 8px; background: #fff7e8; color: #98621b; font-size: 11px; button { padding: 6px 10px; border: 0; border-radius: 6px; color: #fff; background: #d99134; cursor: pointer; white-space: nowrap; } &.reviewBanner { border-color: #c7e2fb; background: #edf7ff; color: #286da6; button { background: #1689ec; } } }
@@ -65,6 +67,6 @@ const workflow = computed(() => [
 .portraitFrame { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; width: 90px; height: 160px; border: 1px solid #9dc9ec; border-radius: 6px; color: #315574; background: #ffffffb8; text-align: center; span { color: #1677c9; font-size: 10px; } strong { font-size: 12px; } small { padding: 0 8px; color: #71869b; font-size: 9px; line-height: 1.4; } }
 .previewFacts { padding: 7px; h4 { margin: 0 0 14px; color: #1677c9; font-size: 12px; } dl { margin: 0; } dl div { display: flex; justify-content: space-between; gap: 8px; padding: 9px 0; border-bottom: 1px solid #e1eaf3; font-size: 11px; } dt { color: #71869b; } dd { margin: 0; text-align: right; } button { margin-top: 17px; padding: 8px 10px; border: 0; border-radius: 6px; color: #fff; background: #1689ec; font-size: 11px; cursor: pointer; } }
 @media (max-width: 1300px) { .topGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .characterPanel { grid-column: 1 / -1; } }
-@media (max-width: 900px) { .topGrid, .middleGrid { grid-template-columns: 1fr; } .characterPanel { grid-column: auto; } .dashboardIntro { display: block; } .introFacts { margin-top: 12px; } }
+@media (max-width: 900px) { .topGrid, .middleGrid { grid-template-columns: 1fr; } .characterPanel { grid-column: auto; } .dashboardIntro { display: block; } .introTools { justify-items: start; margin-top: 14px; } }
 @media (max-width: 600px) { .previewLayout { grid-template-columns: 1fr; } .previewFacts { display: none; } }
 </style>

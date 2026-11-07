@@ -14,14 +14,14 @@
       <div class="homeContent">
         <section class="welcomeCard"><div><span class="eyebrow">从故事出发</span><h2>让小说章节进入短剧生产流程</h2><p>在一个工作台查看原文、分集、角色、场景、道具、分镜、任务和费用；需要时进入画布精修。</p><div class="welcomeActions"><el-button type="primary" size="large" :loading="opening" @click="chooseProject">新建或打开项目</el-button><el-button size="large" :disabled="!recentProjects.length || opening" @click="openProject(recentProjects[0]!)">继续最近项目</el-button></div></div></section>
         <div class="sectionHeading"><div><h2>本地项目</h2><p>选择一个项目进入生产工作台</p></div><span>{{ recentProjects.length }} 个项目</span></div>
-        <div v-if="recentProjects.length" class="projectControls"><el-input v-model="searchTerm" clearable aria-label="搜索项目" placeholder="搜索项目名称或路径" /><el-select v-model="projectSort" aria-label="项目排序"><el-option label="最近打开" value="recent" /><el-option label="名称排序" value="name" /></el-select></div>
+        <div v-if="recentProjects.length" class="projectControls"><el-input v-model="searchTerm" clearable aria-label="搜索项目" placeholder="搜索项目名称或路径" /><el-select v-model="projectSort" aria-label="项目排序" popperClass="studioSelectPopup"><el-option label="最近打开" value="recent" /><el-option label="名称排序" value="name" /></el-select></div>
         <div v-if="displayProjects.length" class="projectGrid"><button v-for="item in displayProjects" :key="item.directory" class="projectCard" type="button" :disabled="opening" @click="openProject(item)"><span class="projectBanner"><span class="projectIcon">{{ item.name.slice(0, 1) || '剧' }}</span><strong>{{ item.name }}</strong></span><small :title="item.directory">{{ item.directory }}</small><span class="projectFooter">最近打开 {{ new Date(item.lastOpenedAt).toLocaleDateString() }}<b>进入工作台 →</b></span></button></div>
         <div v-else-if="recentProjects.length" class="emptyProjects">没有匹配的项目</div>
         <div v-else class="emptyProjects"><strong>还没有短剧项目</strong><p>选择一个空文件夹建立项目，或选择已有 Toonflow 工作区继续。</p><el-button @click="chooseProject">选择项目目录</el-button></div>
         <section class="workflowStrip"><div><span>01</span><strong>导入故事</strong></div><div><span>02</span><strong>分集与资产</strong></div><div><span>03</span><strong>镜头与任务</strong></div><div><span>04</span><strong>成片与费用</strong></div></section>
       </div>
     </section>
-    <workspacePicker ref="projectPicker" hideTrigger />
+    <workspacePicker ref="projectPicker" hideTrigger lightTheme />
   </main>
 </template>
 
@@ -78,7 +78,7 @@ function showError(cause: unknown) {
 </script>
 
 <style scoped lang="scss">
-.studioHome { --el-bg-color-page: #f4f7fb; --el-bg-color-overlay: #fff; --el-border-color: #d9e4ef; --el-border-color-light: #e3ebf4; --el-text-color-primary: #1d2d42; --el-text-color-secondary: #697b8f; --el-text-color-regular: #3c5067; --el-color-primary: #1689ec; --el-color-primary-light-9: #eaf5ff; --el-color-primary-light-7: #b9ddfb; --el-fill-color-light: #f2f7fc; display: grid; grid-template-columns: 222px minmax(0, 1fr); width: 100%; height: 100dvh; overflow: hidden; color: var(--el-text-color-primary); background: var(--el-bg-color-page); }
+.studioHome { --el-bg-color-page: #f4f7fb; --el-bg-color: #fff; --el-bg-color-overlay: #fff; --el-fill-color-blank: #fff; --el-input-bg-color: #fff; --el-border-color: #d9e4ef; --el-border-color-light: #e3ebf4; --el-text-color-primary: #1d2d42; --el-text-color-secondary: #697b8f; --el-text-color-regular: #3c5067; --el-color-primary: #1689ec; --el-color-primary-light-9: #eaf5ff; --el-color-primary-light-7: #b9ddfb; --el-fill-color-light: #f2f7fc; display: grid; grid-template-columns: 222px minmax(0, 1fr); width: 100%; height: 100dvh; overflow: hidden; color: var(--el-text-color-primary); background: var(--el-bg-color-page); }
 .homeRail { display: flex; flex-direction: column; padding: 27px 16px 20px; border-right: 1px solid var(--el-border-color-light); background: var(--el-bg-color-overlay); }
 .brand { display: flex; align-items: center; gap: 11px; margin: 0 10px 42px; strong, small { display: block; } strong { font-size: 15px; } small { margin-top: 4px; color: var(--el-text-color-secondary); font-size: 11px; letter-spacing: .08em; } }
 .brandMark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; background: linear-gradient(135deg, #29b4ef, #627bfa); color: white; font-weight: 700; box-shadow: 0 5px 13px #1788ed38; }
@@ -97,7 +97,7 @@ function showError(cause: unknown) {
 .projectCard { display: grid; justify-items: stretch; gap: 13px; min-width: 0; min-height: 185px; padding: 12px; border: 1px solid var(--el-border-color-light); border-radius: 13px; color: inherit; background: var(--el-bg-color-overlay); text-align: left; cursor: pointer; box-shadow: 0 5px 18px #334b680b; transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; &:hover { border-color: #9fcffa; box-shadow: 0 12px 26px #2668a31c; transform: translateY(-2px); } &:disabled { opacity: .6; cursor: wait; } small { max-width: 100%; margin: 0 4px; overflow: hidden; color: var(--el-text-color-secondary); text-overflow: ellipsis; white-space: nowrap; } }
 .projectBanner { display: flex; align-items: center; gap: 12px; min-height: 86px; padding: 16px; border-radius: 9px; color: #fff; background: linear-gradient(110deg, #5f6ff0, #6d9ef3 55%, #2bbbd1); strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 17px; } }
 .projectCard:nth-child(3n + 2) .projectBanner { background: linear-gradient(110deg, #fa8d4c, #f5af77 58%, #f6c86a); }
-.projectCard:nth-child(3n + 3) .projectBanner { background: linear-gradient(110deg, #254061, #3d648a 60%, #5291ac); }
+.projectCard:nth-child(3n + 3) .projectBanner { background: linear-gradient(110deg, #9153e9, #687fea 58%, #36bdd4); }
 .projectIcon { display: grid; flex: 0 0 34px; place-items: center; width: 34px; height: 34px; border: 1px solid #ffffffa8; border-radius: 10px; background: #ffffff26; color: #fff; font-weight: 700; }
 .projectFooter { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; margin-top: auto; padding: 0 4px 3px; color: var(--el-text-color-secondary); font-size: 11px; b { padding: 7px 10px; border-radius: 6px; color: #fff; background: #1689ec; font-weight: 600; } }
 .emptyProjects { padding: 45px 20px; border: 1px dashed var(--el-border-color); border-radius: 13px; text-align: center; p { color: var(--el-text-color-secondary); } }
@@ -107,4 +107,23 @@ function showError(cause: unknown) {
 .studioHome :deep(.el-button--primary) { color: #fff; border-color: #1689ec; background: #1689ec; box-shadow: 0 5px 13px #1689ec28; }
 @media (max-width: 1100px) { .projectGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .homeContent { padding: 26px; } }
 @media (max-width: 760px) { .studioHome { display: block; overflow: auto; } .homeRail { padding: 12px 16px; .brand, .railNote { display: none; } nav { display: flex; gap: 5px; overflow-x: auto; button { width: auto; min-width: max-content; } } } .homeMain { overflow: visible; } .homeHeader { min-height: 85px; padding: 16px; h1 { font-size: 21px; } } .homeContent { padding: 18px 16px 40px; } .welcomeCard > div:first-child { padding: 24px; } .projectGrid { grid-template-columns: 1fr; } .projectControls { .el-select { flex-basis: 120px; } } .workflowStrip { grid-template-columns: repeat(2, 1fr); } }
+</style>
+
+<style lang="scss">
+.studioSelectPopup {
+  --el-bg-color-overlay: #fff;
+  --el-fill-color-blank: #fff;
+  --el-fill-color-light: #eaf5ff;
+  --el-text-color-primary: #1d2d42;
+  --el-text-color-regular: #3c5067;
+  --el-border-color-light: #d9e4ef;
+  --el-color-primary: #1689ec;
+  background: #fff;
+  border-color: #d9e4ef;
+  box-shadow: 0 12px 30px #2c527222;
+
+  .el-select-dropdown__item { color: #3c5067; }
+  .el-select-dropdown__item.is-selected { color: #0873c9; background: #eaf5ff; }
+  .el-select-dropdown__item:hover { background: #f2f7fc; }
+}
 </style>

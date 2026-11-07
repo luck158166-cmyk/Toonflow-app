@@ -3,7 +3,7 @@
     <span class="directoryName">{{ selectedDirectory ? selectedDirectory.split(/[\\/]/).filter(Boolean).at(-1) || selectedDirectory : '工作目录' }}</span>
     <component :is="dialogVisible ? IconChevronUp : IconChevronDown" :size="14" aria-hidden="true" />
   </el-button>
-  <el-dialog v-model="dialogVisible" :title="manualInputEnabled ? '选择本机工作目录' : !publicWeb && isLocalMobile ? '选择手机工作目录' : '选择服务器工作目录'" width="min(680px, 92vw)" appendToBody :closeOnClickModal="!editing" :closeOnPressEscape="!editing" :showClose="!editing" @close="finishSelection?.(null)">
+  <el-dialog v-model="dialogVisible" :class="{ studioPickerDialog: lightTheme }" :title="manualInputEnabled ? '选择本机工作目录' : !publicWeb && isLocalMobile ? '选择手机工作目录' : '选择服务器工作目录'" width="min(680px, 92vw)" appendToBody :closeOnClickModal="!editing" :closeOnPressEscape="!editing" :showClose="!editing" @close="finishSelection?.(null)">
     <div class="workspaceBrowser">
       <div v-if="manualInputEnabled" class="manualDirectory">
         <el-input v-model="manualDirectory" placeholder="输入本机文件夹的完整路径" :disabled="manualChecking" @keyup.enter="confirmManualDirectory" />
@@ -56,7 +56,7 @@ type DirectoryListing = {
 };
 
 const selectedDirectory = defineModel<string>({ default: "" });
-const props = defineProps<{ disabled?: boolean; hideTrigger?: boolean }>();
+const props = defineProps<{ disabled?: boolean; hideTrigger?: boolean; lightTheme?: boolean }>();
 const dialogVisible = ref(false);
 const selecting = ref(false);
 const loading = ref(false);
@@ -216,5 +216,31 @@ function confirmDirectory() {
     svg { flex-shrink: 0; color: var(--el-text-color-secondary); }
     span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   }
+}
+</style>
+
+<style lang="scss">
+.studioPickerDialog {
+  --el-bg-color: #fff;
+  --el-bg-color-overlay: #fff;
+  --el-fill-color-blank: #fff;
+  --el-fill-color-light: #f3f8fd;
+  --el-input-bg-color: #fff;
+  --el-text-color-primary: #1d2d42;
+  --el-text-color-regular: #3c5067;
+  --el-text-color-secondary: #697b8f;
+  --el-border-color: #d9e4ef;
+  --el-border-color-light: #e3ebf4;
+  --el-color-primary: #1689ec;
+  background: #fff;
+  color: #1d2d42;
+  box-shadow: 0 18px 60px #2c527238;
+
+  .el-dialog__header { border-bottom: 1px solid #e3ebf4; }
+  .el-dialog__title { color: #1d2d42; font-weight: 700; }
+  .el-table { --el-table-bg-color: #fff; --el-table-tr-bg-color: #fff; --el-table-header-bg-color: #f3f8fd; }
+  .el-input__wrapper, .el-select__wrapper { background: #fff; }
+  .el-button:not(.is-text):not(.is-link):not(.el-button--primary) { color: #126fbc; border-color: #c7e2fa; background: #eaf5ff; }
+  .el-button--primary { color: #fff; border-color: #1689ec; background: #1689ec; }
 }
 </style>
