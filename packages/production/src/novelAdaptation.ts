@@ -17,6 +17,34 @@ export type ChapterIndex = {
   issues: string[];
 };
 
+export type SourceEvidence = { sourceHash: string; chapterSequence: number;
+  lineStart: number; lineEnd: number; quote: string };
+
+export type EvidenceCheck = { valid: true } | { valid: false; reason: string };
+
+/** Exact source spans prevent a model from citing an unrelated chapter or invented quotation. */
+export function checkSourceEvidence(sourceText: string, index: ChapterIndex, value: unknown): EvidenceCheck {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { valid: false, reason: "原文证据必须包含章节、行号、原文摘录和来源哈希。" };
+  }
+  const evidence = value as Partial<SourceEvidence>;
+  if (evidence.sourceHash !== index.sourceHash) return { valid: false, reason: "来源哈希不匹配，原文可能已变更。" };
+  const chapter = index.chapters.find(item => item.sequence === evidence.chapterSequence);
+  if (!chapter || !Number.isSafeInteger(evidence.lineStart) || !Number.isSafeInteger(evidence.lineEnd)
+    || evidence.lineStart! < chapter.contentLineStart || evidence.lineEnd! > chapter.lineEnd
+    || evidence.lineStart! > evidence.lineEnd!) {
+    return { valid: false, reason: "证据行号不在指定章节正文内。" };
+  }
+  if (typeof evidence.quote !== "string" || evidence.quote.trim().length < 2 || evidence.quote.length > 2000) {
+    return { valid: false, reason: "原文摘录需为 2–2000 字。" };
+  }
+  const lines = sourceText.replace(/\r\n?/g, "\n").split("\n");
+  const span = lines.slice(evidence.lineStart! - 1, evidence.lineEnd!).join("").replace(/\s/gu, "");
+  const quote = evidence.quote.replace(/\s/gu, "");
+  if (!span.includes(quote)) return { valid: false, reason: "原文摘录不在所引行号内。" };
+  return { valid: true };
+}
+
 const chapterHeading = /^\s*第\s*([零〇一二三四五六七八九十百千万两\d]+)\s*(章|回|节)(?:[\s:：.．、·-]*.{0,40})?\s*$/u;
 
 function chineseNumber(value: string): number | null {

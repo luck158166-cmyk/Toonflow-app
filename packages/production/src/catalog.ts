@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Database } from "bun:sqlite";
-import { checkEpisodeScript, indexNovel } from "./novelAdaptation";
+import { checkEpisodeScript, checkSourceEvidence, indexNovel, type SourceEvidence } from "./novelAdaptation";
 
 export type SourceKind = "synopsis" | "novel" | "script";
 export type ReviewState = "draft" | "confirmed" | "changes_requested";
@@ -9,16 +9,17 @@ export type VideoReadiness = "blocked" | "ready";
 export type DialogueKind = "dialogue" | "narration" | "voiceover" | "phone";
 export type CandidateState = "pending" | "linked" | "ignored";
 export type AssetKind = "character" | "prop" | "costume";
+export type DraftEvidence = string | SourceEvidence;
 
 export type EpisodeDraft = {
   episodeNumber: number; title: string; logline: string; outline: string[]; script: unknown[];
-  scenes: Array<{ name: string; location: string; atmosphere: string; timeWeather: string; evidence: string[] }>;
-  characters: Array<{ name: string; aliases: string[]; stableDescription: string; evidence: string[]; firstAppearance: string }>;
-  props?: Array<{ name: string; aliases: string[]; stableDescription: string; evidence: string[]; firstAppearance: string }>;
-  shots: Array<{ sequence: number; sceneName: string; title: string; scriptExcerpt: string; evidence: string[];
+  scenes: Array<{ name: string; location: string; atmosphere: string; timeWeather: string; evidence: DraftEvidence[] }>;
+  characters: Array<{ name: string; aliases: string[]; stableDescription: string; evidence: DraftEvidence[]; firstAppearance: string }>;
+  props?: Array<{ name: string; aliases: string[]; stableDescription: string; evidence: DraftEvidence[]; firstAppearance: string }>;
+  shots: Array<{ sequence: number; sceneName: string; title: string; scriptExcerpt: string; evidence: DraftEvidence[];
     durationMs: number; shotSize: string; movement: string; promptText: string; characterNames: string[];
     propUses?: Array<{ name: string; holderBeforeName?: string; holderAfterName?: string;
-      stateBefore: string; stateAfter: string; interaction: string; evidence: string[] }>;
+      stateBefore: string; stateAfter: string; interaction: string; evidence: DraftEvidence[] }>;
     dialogue: Array<{ kind: DialogueKind; speakerName?: string; listenerName?: string; text: string; emotion?: string; voiceProfile?: string }> }>;
 };
 
@@ -565,6 +566,36 @@ export function applyEpisodeDraft(catalog: ProductionCatalog, projectId: string,
   }
   if (!draft.scenes.length || !draft.shots.length || draft.shots.length > 200) {
     throw new Error("An episode draft needs at least one scene and one shot, with at most 200 shots.");
+  }
+  const story = catalog.getStory(projectId);
+  if (!story) throw new Error(`Unknown production story: ${projectId}`);
+  if (story.sourceKind === "novel") {
+    const sourceIndex = indexNovel(story.sourceText);
+    if (!sourceIndex.chapters.length) throw new Error("小说尚未确认分章边界，不能采用自动分集草稿。");
+    const evidenceLists: Array<[string, DraftEvidence[]]> = [
+      ...draft.script.map((rawScene, index) => {
+        const scene = rawScene && typeof rawScene === "object" && !Array.isArray(rawScene)
+          ? rawScene as { evidence?: unknown } : null;
+        const references = Array.isArray(scene?.evidence) ? scene.evidence as DraftEvidence[] : [];
+        return [`剧本第 ${index + 1} 场`, references] as [string, DraftEvidence[]];
+      }),
+      ...draft.scenes.map(scene => [`场景“${scene.name}”`, scene.evidence] as [string, DraftEvidence[]]),
+      ...draft.characters.map(character => [`人物“${character.name}”`, character.evidence] as [string, DraftEvidence[]]),
+      ...(draft.props ?? []).map(prop => [`道具“${prop.name}”`, prop.evidence] as [string, DraftEvidence[]]),
+      ...draft.shots.flatMap(shot => [
+        [`镜头 ${shot.sequence}`, shot.evidence] as [string, DraftEvidence[]],
+        ...(shot.propUses ?? []).map(use => [`镜头 ${shot.sequence} 道具“${use.name}”`, use.evidence] as [string, DraftEvidence[]]),
+      ]),
+    ];
+    for (const [label, evidence] of evidenceLists) {
+      if (!evidence.length) throw new Error(`${label}缺少原文证据。`);
+      for (const value of evidence) {
+        const check = checkSourceEvidence(story.sourceText, sourceIndex, value);
+        if (!check.valid) throw new Error(`${label}的原文证据无效：${check.reason}`);
+      }
+    }
+    const scriptReport = checkEpisodeScript(draft.script, sourceIndex.chapters);
+    if (!scriptReport.passed) throw new Error(`小说改编剧本未通过基础检查：${scriptReport.checks[0]?.message}`);
   }
   const characterNames = new Map<string, string>();
   for (const character of draft.characters) {
