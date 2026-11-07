@@ -13,7 +13,7 @@
       </div>
       <details v-if="report.snapshot.shot.promptText"><summary>查看编剧草稿提示词（尚未编译）</summary><pre>{{ report.snapshot.shot.promptText }}</pre></details>
       <div class="saveActions"><el-button type="primary" :disabled="loading || !!report.issues.length || !!savedVersion" :loading="saving" @click="savePreparation">{{ savedVersion ? `当前资料已保存为 v${savedVersion.version}` : '保存镜头资料版本' }}</el-button><span>本地检查与保存，不调用模型。</span></div>
-      <p class="notice">此版本保存镜头依据、原对白和原图顺序。片段划分、站位与动作细化、模型专用提示词、平台素材信任及费用预检仍需完成；保存不会把视频标为就绪。</p>
+      <shotPromptPanel :directory="directory" :projectId="projectId" :shotId="selectedId" :preparationHash="report.inputHash" :preparationSaved="!!savedVersion" />
       <details v-if="report.history.length"><summary>资料版本记录（{{ report.history.length }}）</summary><p v-for="entry in report.history" :key="entry.id">v{{ entry.version }} · {{ new Date(entry.createdAt).toLocaleString() }} · {{ entry.inputHash === report.inputHash ? '与当前资料一致' : '旧版，保留原记录' }}</p></details>
     </template>
     <p v-else-if="!loading" class="notice">建立并审核分集后，在这里查看每个镜头的制作资料。</p>
@@ -26,6 +26,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import productionApi, { type ProjectProduction, type ReferenceRole, type ShotPreparation } from "@/lib/productionApi";
 import referenceThumb from "./referenceThumb.vue";
+import shotPromptPanel from "./shotPromptPanel.vue";
 const props = defineProps<{ directory: string; projectId: string; shots: ProjectProduction["shots"] }>();
 const emit = defineEmits<{ openAssets: [] }>();
 const selectedId = ref("");

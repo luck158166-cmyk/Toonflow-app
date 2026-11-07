@@ -4,7 +4,7 @@ import { prepareAdaptationInput } from "@toonflow/production";
 import u from "@/utils";
 import { validateFields } from "@/lib/middleware";
 import { error, success } from "@/lib/responseFormat";
-import { episodeDraftSchema } from "@/lib/episodeDraftSchema";
+import { directedEpisodeSchema } from "@/lib/episodeDraftSchema";
 
 const router = Router();
 export default router.post("/", validateFields({ directory: z.string().min(1).max(4096), projectId: z.uuid(),
@@ -17,7 +17,7 @@ export default router.post("/", validateFields({ directory: z.string().min(1).ma
   if (!u.workspace.isLocalWorkspaceRequest(req)) return res.status(403).json(error("当前仅支持本地工作区", null, 403));
   const result = await u.production.withProduction(directory, catalog => {
     try { return { data: prepareAdaptationInput(catalog, req.body.projectId, req.body.options,
-      z.toJSONSchema(episodeDraftSchema)) }; }
+      z.toJSONSchema(directedEpisodeSchema)) }; }
     catch (cause) { return { message: cause instanceof Error ? cause.message : "编剧输入准备失败" }; }
   });
   if (result.message) return res.status(422).json(error(result.message, null, 422));

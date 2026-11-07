@@ -30,6 +30,8 @@ it("binds and reads preserved image bytes through actual local routes, rejects t
     app.use("/list", listRoute); app.use("/bind", bindRoute); app.use("/read", readRoute);
     app.use("/preparation", (await import("../apps/server/src/routes/production/getShotPreparation")).default);
     app.use("/savePreparation", (await import("../apps/server/src/routes/production/saveShotPreparation")).default);
+    app.use("/prompt", (await import("../apps/server/src/routes/production/getShotPrompt")).default);
+    app.use("/savePrompt", (await import("../apps/server/src/routes/production/saveShotPrompt")).default);
     app.use((error: Error & { status?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => res.status(error.status ?? 500).json({ message: error.message }));
     server = app.listen(0, "127.0.0.1"); await new Promise<void>(resolve => server!.once("listening", resolve));
     const address = server.address(); if (!address || typeof address === "string") throw new Error("Missing port");
@@ -86,6 +88,20 @@ it("binds and reads preserved image bytes through actual local routes, rejects t
     const saved = (await savedResponse.json()).data;
     expect(saved.version).toBe(1);
     expect((await (await save()).json()).data).toEqual({ ...saved, created: false });
+    const promptResponse = await fetch(base + "/prompt?" + preparationQuery, { headers });
+    expect(promptResponse.status).toBe(200);
+    const compiled = (await promptResponse.json()).data;
+    expect(compiled.canSave).toBe(true); expect(compiled.readyForGeneration).toBe(false);
+    const promptInput = { ...saveInput, inputHash: compiled.inputHash };
+    const savePrompt = (input = promptInput, origin = base) => fetch(base + "/savePrompt", {
+      method: "POST", headers: { ...headers, origin }, body: JSON.stringify(input) });
+    expect((await savePrompt(promptInput, "https://untrusted.example.test")).status).toBe(403);
+    expect((await savePrompt({ ...promptInput, projectId })).status).toBe(409);
+    expect((await savePrompt({ ...promptInput, inputHash: "f".repeat(64) })).status).toBe(409);
+    const promptSavedResponse = await savePrompt(); expect(promptSavedResponse.status).toBe(200);
+    const promptSaved = (await promptSavedResponse.json()).data;
+    expect(promptSaved.version).toBe(1);
+    expect((await (await savePrompt()).json()).data).toEqual({ ...promptSaved, created: false });
     expect(await u.production.withProduction(workspace, (_catalog, store) => store.listProjectTasks(fixture.projectId))).toEqual([]);
     const archive = unzipSync(await u.production.createProjectBackup(workspace, root));
     expect(archive["workspace/" + first.path]).toEqual(new Uint8Array(bytes));
@@ -94,6 +110,8 @@ it("binds and reads preserved image bytes through actual local routes, rejects t
       expect(snapshot.query("SELECT sha256 FROM asset_reference WHERE id = ?").get(first.id)).toEqual({ sha256 });
       const manifest = snapshot.query("SELECT snapshot_json AS content FROM shot_preparation WHERE id = ?").get(saved.id) as { content: string };
       expect(JSON.parse(manifest.content)).toEqual(prepared.snapshot);
+      const promptManifest = snapshot.query("SELECT snapshot_json AS content FROM compiled_shot_prompt WHERE id = ?").get(promptSaved.id) as { content: string };
+      expect(JSON.parse(promptManifest.content)).toEqual(compiled.snapshot);
     }
     finally { snapshot.close(); }
     writeFileSync(join(workspace, first.path), "tampered preserved file");
@@ -102,6 +120,9 @@ it("binds and reads preserved image bytes through actual local routes, rejects t
     const broken = (await (await fetch(base + "/preparation?" + preparationQuery, { headers })).json()).data;
     expect(broken.issues.some((item: { code: string }) => item.code === "referenceBytes")).toBe(true);
     expect((await save()).status).toBe(409);
+    const brokenPrompt = (await (await fetch(base + "/prompt?" + preparationQuery, { headers })).json()).data;
+    expect(brokenPrompt.canSave).toBe(false); expect(brokenPrompt.fileIssues).toHaveLength(6);
+    expect((await savePrompt()).status).toBe(409);
     writeFileSync(join(workspace, "input.png"), bytes);
     expect((await post(input)).status).toBe(409);
     const references = await u.production.withProduction(workspace, catalog => listAssetReferences(catalog, projectId));

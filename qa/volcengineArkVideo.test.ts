@@ -13,6 +13,15 @@ const task: Task = {
 };
 
 describe("Volcengine Ark Seedance adapter", () => {
+  it("rejects durations outside the verified 4 to 30 second range before network submission", async () => {
+    let calls = 0;
+    const adapter = new VolcengineArkVideoAdapter("test-secret", { fetchImpl: async () => { calls++; return Response.json({ id: "qa" }); } });
+    for (const duration of [2, 3, 3.5, 31]) await expect(adapter.submit({ ...task,
+      requestJson: JSON.stringify({ prompt: "QA", destinationPath: "assets/qa.mp4", duration }) })).rejects.toThrow("4 to 30");
+    expect(calls).toBe(0);
+    for (const duration of [4, 30]) await adapter.submit({ ...task, requestJson: JSON.stringify({ prompt: "QA", destinationPath: "assets/qa.mp4", duration }) });
+    expect(calls).toBe(2);
+  });
   it("submits the official async task shape without exposing credentials in errors", async () => {
     let sentUrl = "";
     let sentInit: RequestInit | undefined;

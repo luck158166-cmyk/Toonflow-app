@@ -60,7 +60,10 @@ it("uses actual HTTP routes and the host SDK with an intercepted wire, including
         characters: [{ name: "林岚", aliases: [], stableDescription: "黑发女子", firstAppearance: "第一章", evidence }],
         scenes: [{ name: "车站", location: "车站", atmosphere: "寂静", timeWeather: "夜", evidence }],
         shots: [{ sequence: 1, sceneName: "车站", title: "进入车站", scriptExcerpt: "林岚走进车站", evidence,
-          durationMs: 5000, shotSize: "近景", movement: "固定", promptText: "", characterNames: ["林岚"], dialogue: [] }] };
+          durationMs: 5000, shotSize: "近景", movement: "固定", promptText: "", characterNames: ["林岚"], dialogue: [],
+          direction: { summary: "林岚走进车站", action: "林岚走过门口，停下脚步", camera: "固定",
+            positions: [{ name: "林岚", start: "在左侧门口面向候车厅", end: "在画面中央看向前方" }],
+            environment: "夜间车站灯光昏黄", style: "动画", sound: "脚步声" } }] };
       const input = { directory: workspace, projectId, inputId: prepared.data.id, providerId: "qa-provider", modelId: "qa-text", maxOutputTokens: 8192 };
       const before = modelCalls;
       expect((await post("/preview", input, "https://untrusted.example.test")).status).toBe(403);

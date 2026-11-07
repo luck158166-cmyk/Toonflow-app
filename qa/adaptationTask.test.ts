@@ -1,5 +1,6 @@
 import { expect, it } from "bun:test";
 import { Database } from "bun:sqlite";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "@toonflow/file";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,11 +12,11 @@ import { runTextTask } from "../packages/production/src/textWorker";
 import { episodeDraftSchema } from "../apps/server/src/lib/episodeDraftSchema";
 
 const sourceText = "第一章 雨夜\n" + "林岚走进车站，拾起铜钥匙。".repeat(9);
-function setup(projectDb: Database, globalDb: Database) {
+function setup(projectDb: Database, globalDb: Database, requireDirection = false) {
   const catalog = new ProductionCatalog(projectDb); const store = new ProductionStore(globalDb);
   const projectId = catalog.importStory({ title: "雨夜", sourceKind: "novel", sourceText });
   const prepared = prepareAdaptationInput(catalog, projectId, { episodeNumber: 1, firstChapter: 1,
-    lastChapter: 1, targetSeconds: 5, genre: "悬疑", visualStyle: "动画" }, {});
+    lastChapter: 1, targetSeconds: 5, genre: "悬疑", visualStyle: "动画" }, requireDirection ? { properties: { shots: { items: { required: ["direction"] } } } } : {});
   const evidence = [{ sourceHash: prepared.sourceHash, chapterSequence: 1, lineStart: 2, lineEnd: 2, quote: "林岚走进车站，拾起铜钥匙。" }];
   const draft = { episodeNumber: 1, title: "雨夜", logline: "拾起钥匙", outline: ["拾起钥匙"],
     script: [{ location: "车站", characters: ["林岚"], evidence, beats: [{ type: "action", text: "林岚拾起钥匙" }] }],
@@ -84,4 +85,33 @@ it("rejects wrong episode numbers, duration and malformed content without persis
       expect(state.store.getTask(state.task.id).state).toBe("succeeded");
     } finally { projectDb.close(); globalDb.close(); }
   }
+});
+
+it("rejects missing required director fields without repeating or discarding a successful model response", async () => {
+  const projectDb = new Database(":memory:"); const globalDb = new Database(":memory:");
+  try {
+    const s = setup(projectDb, globalDb, true); let calls = 0;
+    const provider = { providerId: "mock", async generate() { calls++; return { responseText: JSON.stringify(s.draft), providerRequestId: "qa", usageJson: "{}" }; } };
+    await runTextTask(s.store, s.task.id, provider);
+    expect(s.adopt).toThrow("导演资料");
+    await runTextTask(s.store, s.task.id, provider);
+    expect(calls).toBe(1); expect(s.catalog.getProjectProduction(s.projectId).episodes).toHaveLength(0);
+    expect(s.store.getTextOutput(s.task.id)?.responseText).toBe(JSON.stringify(s.draft));
+  } finally { projectDb.close(); globalDb.close(); }
+});
+
+it("keeps historical v1 inputs resumable after adding the v2 director contract", async () => {
+  const projectDb = new Database(":memory:"); const globalDb = new Database(":memory:");
+  try {
+    const s = setup(projectDb, globalDb);
+    const oldRequest = JSON.parse(s.prepared.requestJson); oldRequest.templateVersion = "novelEpisode.v1";
+    delete oldRequest.directionInstructions;
+    const json = JSON.stringify(oldRequest); const id = createHash("sha256").update(json).digest("hex");
+    projectDb.query("INSERT INTO adaptation_input(id, project_id, episode_number, source_hash, template_version, request_json, created_at) VALUES (?, ?, 1, ?, ?, ?, ?)")
+      .run(id, s.projectId, s.prepared.sourceHash, "novelEpisode.v1", json, Date.now());
+    const task = s.store.createTask({ ...buildAdaptationTask(s.catalog, s.projectId, id, "mock", "mock"), billable: false, estimatedCostMicros: 0, currency: "CNY" }).task;
+    await runTextTask(s.store, task.id, { providerId: "mock", async generate() { return { responseText: JSON.stringify(s.draft), providerRequestId: "qa", usageJson: "{}" }; } });
+    expect(adoptAdaptationResponse(s.catalog, s.store, s.projectId, id, task.id, value => episodeDraftSchema.parse(value)).alreadyAdopted).toBe(false);
+    expect(s.catalog.getProjectProduction(s.projectId).shots[0]!.direction).toBeNull();
+  } finally { projectDb.close(); globalDb.close(); }
 });

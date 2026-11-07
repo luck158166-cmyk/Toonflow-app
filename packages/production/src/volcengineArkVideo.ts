@@ -46,8 +46,8 @@ function parseRequest(task: Task): ArkVideoRequest {
     }
     return input as string[];
   };
-  if (value.duration !== undefined && (!Number.isInteger(value.duration) || (value.duration as number) < 2 || (value.duration as number) > 30)) {
-    throw new RangeError("Seedance 2.5 duration must be an integer from 2 to 30 seconds.");
+  if (value.duration !== undefined && (!Number.isInteger(value.duration) || (value.duration as number) < 4 || (value.duration as number) > 30)) {
+    throw new RangeError("Seedance 2.5 duration must be an integer from 4 to 30 seconds.");
   }
   for (const key of ["firstFrameUrl", "lastFrameUrl"] as const) {
     if (value[key] !== undefined && (typeof value[key] !== "string" || !value[key].trim())) {

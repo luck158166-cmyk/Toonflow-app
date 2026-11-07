@@ -2,12 +2,13 @@ import { createHash } from "node:crypto";
 import { applyEpisodeDraft, type EpisodeDraft, type ProductionCatalog } from "./catalog";
 import { buildAdaptationInput, type AdaptationOptions } from "./adaptationInput";
 import type { ProductionStore, PricedTaskInput } from "./store";
+import { validateShotDirection } from "./shotDirection";
 
 export function readAdaptationInput(catalog: ProductionCatalog, projectId: string, inputId: string) {
   const row = catalog.db.query(`SELECT request_json AS requestJson FROM adaptation_input WHERE id = ? AND project_id = ?`)
     .get(inputId, projectId) as { requestJson: string } | null;
   if (!row || createHash("sha256").update(row.requestJson).digest("hex") !== inputId) throw new Error("编剧输入不存在或已被改动");
-  const request = JSON.parse(row.requestJson) as { options: AdaptationOptions; responseSchema: unknown };
+  const request = JSON.parse(row.requestJson) as { options: AdaptationOptions; responseSchema: unknown; templateVersion: "novelEpisode.v1" | "novelEpisode.v2" };
   return { ...row, ...request };
 }
 
@@ -20,7 +21,7 @@ export function buildAdaptationTask(catalog: ProductionCatalog, projectId: strin
   provider: string, modelId: string): Omit<PricedTaskInput, "unit" | "quantity"> {
   if (!provider.trim() || !modelId.trim()) throw new Error("编剧供应商与模型不能为空");
   const input = readAdaptationInput(catalog, projectId, inputId);
-  if (buildAdaptationInput(catalog, projectId, input.options, input.responseSchema).id !== inputId) {
+  if (buildAdaptationInput(catalog, projectId, input.options, input.responseSchema, input.templateVersion).id !== inputId) {
     throw new Error("原文或连续性资料已变更，请重新准备编剧输入");
   }
   return { projectId, episodeId: `adaptation:${input.options.episodeNumber}`, stage: "text", provider, modelId,
@@ -46,6 +47,10 @@ export function adoptAdaptationResponse(catalog: ProductionCatalog, store: Produ
     return { episodeId: receipt.episodeId, alreadyAdopted: true };
   }
   const draft = parseDraft(JSON.parse(output.responseText));
+  const schema = input.responseSchema as { properties?: { shots?: { items?: { required?: string[] } } } } | null;
+  if (schema?.properties?.shots?.items?.required?.includes("direction")) {
+    for (const shot of draft.shots) validateShotDirection(shot.direction, shot.characterNames);
+  }
   if (draft.episodeNumber !== input.options.episodeNumber) throw new Error("生成的集号与编剧任务不一致");
   const duration = draft.shots.reduce((sum, shot) => sum + shot.durationMs, 0);
   if (Math.abs(duration - input.options.targetSeconds * 1000) > Math.max(1000, input.options.targetSeconds * 150)) {
@@ -63,7 +68,7 @@ export function adoptAdaptationResponse(catalog: ProductionCatalog, store: Produ
   checkChapter(draft);
   const result = applyEpisodeDraft(catalog, projectId, draft, { taskId, inputId, responseHash: output.sha256,
     validateCurrentInput: () => {
-      if (buildAdaptationInput(catalog, projectId, input.options, input.responseSchema).id !== inputId) {
+      if (buildAdaptationInput(catalog, projectId, input.options, input.responseSchema, input.templateVersion).id !== inputId) {
         throw new Error("原文或连续性资料已变更，请重新准备编剧输入");
       }
     } });

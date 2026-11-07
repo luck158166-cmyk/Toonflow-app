@@ -43,7 +43,7 @@ app.use("/api", (req, res, next) => {
   if ((req.query.directory ?? req.body?.directory) !== directory) return res.status(403).json({ message: "QA workspace only" });
   next();
 });
-for (const name of ["getAssetReferences", "bindAssetReference", "readAssetReference", "getShotPreparation", "saveShotPreparation"]) {
+for (const name of ["getAssetReferences", "bindAssetReference", "readAssetReference", "getShotPreparation", "saveShotPreparation", "getShotPrompt", "saveShotPrompt"]) {
   app.use(`/api/production/${name}`, (await import(`../apps/server/src/routes/production/${name}.ts`)).default);
 }
 for (const name of ["list", "mkdir", "write"]) {

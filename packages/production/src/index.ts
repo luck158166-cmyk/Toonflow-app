@@ -6,6 +6,8 @@ export * from "./adaptationExecution";
 export * from "./episodeReview";
 export * from "./assetReference";
 export * from "./shotPreparation";
+export * from "./shotDirection";
+export * from "./shotPrompt";
 export * from "./store";
 export * from "./globalBudgetCoordinator";
 export * from "./dispatcher";

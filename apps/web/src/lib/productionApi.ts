@@ -22,6 +22,12 @@ export type ShotPreparation = { inputHash: string; issues: Array<{ code: string;
     props: Array<{ propId: string; propName: string; holderBeforeName: string | null; holderAfterName: string | null; stateBefore: string; stateAfter: string; interaction: string }>;
     continuity: { previousShot: { title: string; scriptExcerpt: string } | null; nextShot: { title: string; scriptExcerpt: string } | null } } };
 
+export type CompiledShotPrompt = { inputHash: string; canSave: boolean; readyForGeneration: false;
+  fileIssues: Array<{ code: string; message: string }>;
+  history: Array<{ id: string; version: number; inputHash: string; createdAt: number }>;
+  snapshot: { templateVersion: string; preparationHash: string;
+    requestDraft: { model: string; duration: number; ratio: string; resolution: string; prompt: string };
+    checks: Array<{ code: string; state: "passed" | "failed" | "pending"; message: string }> } };
 export type SourceKind = "synopsis" | "novel" | "script";
 export type Story = { id: string; title: string; sourceKind: SourceKind; workflowState: string; createdAt: number; updatedAt: number };
 export type StoryDetail = Story & { sourceText: string };
@@ -88,6 +94,14 @@ export type BudgetOverview = { global: BudgetUsage; globalHistory: BudgetChange[
 const client = axios.create({ baseURL: "/api/production", headers: { "x-toonflow-workspace": "1" } });
 
 const productionApi = {
+  async getShotPrompt(directory: string, projectId: string, shotId: string) {
+    const { data } = await client.get<{ data: CompiledShotPrompt }>("/getShotPrompt", { params: { directory, projectId, shotId } });
+    return data.data;
+  },
+  async saveShotPrompt(directory: string, projectId: string, shotId: string, inputHash: string) {
+    const { data } = await client.post<{ data: { id: string; version: number; created: boolean } }>("/saveShotPrompt", { directory, projectId, shotId, inputHash });
+    return data.data;
+  },
   async getShotPreparation(directory: string, projectId: string, shotId: string) {
     const { data } = await client.get<{ data: ShotPreparation }>("/getShotPreparation", { params: { directory, projectId, shotId } });
     return data.data;
