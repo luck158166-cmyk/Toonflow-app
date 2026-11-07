@@ -211,10 +211,11 @@ async function configuredProvider(request: MediaGenerationRequest, mediaType: "i
     return { provider, request: { ...request, providerId: provider.id, modelId: upstream.upstreamModelId } };
   }
   const info = await getMediaProvider(request.providerId);
-  if (!resume) await assertProductionProviderRevision(directory, info.revision);
-  if (!resume && !info.models.some(model => model.id === request.modelId && model.type === mediaType)) invalid("所选媒体模型不存在或类型不匹配，请重新选择");
   const configurations = record(conf.get("settings", {}).mediaProviderConfigs);
-  const provider = await loadMediaProviderSource(info.source, record(configurations[info.id]), signal, undefined, directory, saveTaskData);
+  const configuration = record(configurations[info.id]);
+  if (!resume) await assertProductionProviderRevision(directory, info.revision, configuration.apiKey);
+  if (!resume && !info.models.some(model => model.id === request.modelId && model.type === mediaType)) invalid("所选媒体模型不存在或类型不匹配，请重新选择");
+  const provider = await loadMediaProviderSource(info.source, configuration, signal, undefined, directory, saveTaskData);
   return { provider, request };
 }
 

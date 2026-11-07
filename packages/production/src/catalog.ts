@@ -251,6 +251,12 @@ export class ProductionCatalog {
         reviewed_by TEXT NOT NULL, created_at INTEGER NOT NULL,
         UNIQUE(episode_id, plan_hash, segment_sequence)
       );
+      CREATE TABLE IF NOT EXISTS asset_reference_origin (
+        reference_id TEXT PRIMARY KEY REFERENCES asset_reference(id), task_id TEXT NOT NULL,
+        model_id TEXT NOT NULL, generated_at INTEGER NOT NULL, credential_scope TEXT NOT NULL,
+        method TEXT NOT NULL CHECK(method = 'textToImage'), original_sha256 TEXT NOT NULL,
+        UNIQUE(task_id)
+      );
     `);
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (3, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
@@ -269,6 +275,8 @@ export class ProductionCatalog {
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (10, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (11, ?) ON CONFLICT(version) DO NOTHING`)
+      .run(Date.now());
+    db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (12, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
   }
 

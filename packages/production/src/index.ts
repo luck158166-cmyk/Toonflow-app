@@ -10,6 +10,7 @@ export * from "./shotDirection";
 export * from "./shotPrompt";
 export * from "./segmentPlan";
 export * from "./segmentExecution";
+export * from "./assetImage";
 export * from "./store";
 export * from "./globalBudgetCoordinator";
 export * from "./dispatcher";

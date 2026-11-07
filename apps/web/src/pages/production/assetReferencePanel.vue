@@ -5,6 +5,7 @@
     <div class="referenceSelectors"><el-select v-model="selectedId" :disabled="saving || loading" placeholder="选择人物、场景或道具" aria-label="参考图资产" popperClass="studioSelectPopup"><el-option v-for="target in targets" :key="target.entityId" :value="target.entityId" :label="`${kindLabel(target.kind)} · ${target.name}`" /></el-select><el-select v-model="role" :disabled="saving || loading" aria-label="参考图用途" popperClass="studioSelectPopup"><el-option v-for="item in selectedTarget?.roles ?? []" :key="item" :value="item" :label="roleLabel(item)" /></el-select></div>
     <template v-if="selectedTarget && !loading">
       <div class="assetDescription"><strong>{{ selectedTarget.name }}</strong><p>{{ selectedTarget.description }}</p><small>{{ selectedTarget.locked ? '资产描述已锁定' : '先在分集审核中确认资产描述，再绑定图片' }}</small></div>
+      <assetImagePanel :directory="directory" :projectId="projectId" :target="selectedTarget" :role="role" @changed="loadReferences(); emit('changed')" @openCosts="emit('openCosts')" />
       <div class="referenceComparison">
         <article><h4>当前{{ roleLabel(role) }} <span v-if="currentReference">v{{ currentReference.version }}</span></h4><div class="imageFrame"><referenceThumb v-if="currentReference" :directory="directory" :projectId="projectId" :referenceId="currentReference.id" :label="selectedTarget.name" /><span v-else>尚未绑定原图</span></div><p v-if="currentReference">{{ currentReference.width }} × {{ currentReference.height }} · {{ currentReference.sourceNote }}</p><p v-if="currentReference && currentReference.entityHash !== selectedTarget.entityHash" class="errorText">资产描述已变化，原参考图需重新核对。</p></article>
         <article><h4>{{ currentReference ? '替换为新版本' : '选择参考图' }}</h4><div class="imageFrame"><img v-if="previewUrl" :src="previewUrl" alt="待确认的参考图" @load="imageReady = true" @error="imageReady = false" /><span v-else>选择原图后在此预览</span></div><input ref="fileInput" class="hiddenInput" type="file" accept="image/png,image/jpeg,image/webp" :disabled="saving" @change="chooseFile" /><el-button type="primary" :disabled="saving || !selectedTarget.locked" @click="fileInput?.click()">选择本地原图</el-button><small>{{ selectedFile?.name || 'PNG / JPEG / WebP，最大 20 MB；保留原始尺寸' }}</small></article>
@@ -28,8 +29,9 @@ import { ElMessage } from "element-plus";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import productionApi, { type AssetReference, type ReferenceRole, type ReferenceTarget } from "@/lib/productionApi";
 import referenceThumb from "./referenceThumb.vue";
+import assetImagePanel from "./assetImagePanel.vue";
 const props = defineProps<{ directory: string; projectId: string }>();
-const emit = defineEmits<{ changed: [] }>();
+const emit = defineEmits<{ changed: []; openCosts: [] }>();
 const targets = ref<ReferenceTarget[]>([]);
 const references = ref<AssetReference[]>([]);
 const selectedId = ref("");

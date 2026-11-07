@@ -4,6 +4,7 @@
 // 恢复协议：https://ark.volcengine.com/region:cn-beijing/docs/get-video-generation-task-api.md
 const baseUrl = "https://ark.cn-beijing.volces.com/api/v3";
 const videoModel = "doubao-seedance-2-5-260628";
+const imageModel = "doubao-seedream-5-0-pro-260628";
 const rules = [{ type: "input", field: "apiKey", title: "火山方舟 API Key", value: "", props: { type: "password", showPassword: true } }] as const;
 type Context = ProviderContext<{ apiKey: string }>;
 type ReferencedVideoRequest = VideoRequest & {
@@ -64,9 +65,17 @@ async function requestJson(context: Context, path: string, signal: AbortSignal, 
   });
   if (!response.ok) {
     const detail = context.tool.errorMessage(await response.text());
-    throw new Error(`方舟视频接口 HTTP ${response.status}${detail ? `：${detail}` : ""}；保留任务记录，请先核对状态与费用`);
+    throw new Error(`方舟接口 HTTP ${response.status}${detail ? `：${detail}` : ""}；保留任务记录，请先核对状态与费用`);
   }
   return object(await response.json());
+}
+
+function imageReceipt(data: ProviderTaskData): MediaAsset[] {
+  if (data.kind !== "arkImage" || data.version !== 1 || data.model !== imageModel || data.mode !== "textToImage"
+    || typeof data.created !== "number" || !Number.isSafeInteger(data.created) || data.created < 1
+    || data.created > Date.now() / 1000 + 300) throw new Error("方舟图片回执无效，不能重新提交");
+  if (Date.now() >= data.created * 1000 + 24 * 60 * 60_000) throw new Error("方舟图片原链接已超过有效期；请核对平台或备份，不能自动付费重生成");
+  return [{ mediaType: "image", type: "url", url: httpsUrl(data.url), mimeType: "image/png" }];
 }
 
 function executionSignal(context: Context) {
@@ -112,13 +121,37 @@ async function pollVideo(context: Context, data: ProviderTaskData, signal: Abort
 }
 
 export default {
-  id: "volcengine", label: "火山方舟", icon: "", version: "1.0.0", apiUrl: baseUrl, rules,
-  readme: "Seedance 2.5：文生视频、参考图生视频、首帧及首尾帧。原图不作缩放；首尾帧模式需选择 adaptive 比例。接单后保存任务 ID，中断后查询原任务，不重新提交。当前不支持视频/音频参考、样片转正式视频、Seedream 或语音生成。价格须在生产成本中心配置，供应商列表不提供未经核实的估价；本入口不代表生产片段已就绪。",
+  id: "volcengine", label: "火山方舟", icon: "", version: "1.1.0", apiUrl: baseUrl, rules,
+  readme: "Seedance 2.5 视频与 Seedream 5.0 pro 单张文生图。Seedream 原始 PNG 不作缩放或裁剪，当前支持 1024×1024、800×1424；图片响应先保存再下载，恢复只下载已有结果，不重发生成。人物素材是否可用于视频还须检查来源、原字节、同账号与有效期。视频支持文本、参考图和首尾帧；暂不支持音视频参考、样片转正式或语音生成。价格须在生产成本中心确认。",
   models: [{ id: "doubao-seedance-2-5-260628", label: "Seedance 2.5", type: "video", audio: "optional",
     mode: ["text", ["imageReference:30"], "startFrameOptional", "startEndRequired"],
     imageRatios: ["9:16", "16:9", "4:3", "1:1", "3:4", "21:9", "adaptive"],
     durationResolutionMap: [{ duration: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30], resolution: ["480p", "720p", "1080p"] }],
-  }],
+  }, { id: "doubao-seedream-5-0-pro-260628", label: "Seedream 5.0 pro · 资产文生图", type: "image", mode: ["text"],
+    imageSizes: ["1024x1024", "800x1424"], imageRatios: ["1:1", "9:16"] }],
+  async generateImage(request: ImageRequest): Promise<MediaAsset[]> {
+    apiKey(this);
+    if (!this.saveTaskData) throw new Error("方舟图片必须通过可持久化的宿主任务执行");
+    if (request.model !== imageModel) throw new Error("当前仅支持 Seedream 5.0 pro 固定版本");
+    const size = request.size ?? "1024x1024";
+    if (!["1024x1024", "800x1424"].includes(size)) throw new Error("当前资产文生图仅支持 1024x1024 或 800x1424 原始尺寸");
+    if (request.ratio && request.ratio !== (size === "1024x1024" ? "1:1" : "9:16")) throw new Error("图片宽高比与尺寸不匹配");
+    if (request.images?.length || request.other && Object.keys(request.other).length) throw new Error("当前资产入口仅支持单张文生图，不接受参考图、图层或扩展参数");
+    if (!request.prompt.trim() || [...request.prompt].length > 2000) throw new Error("图片提示词须为 1–2000 字符");
+    const result = await requestJson(this, "/images/generations", executionSignal(this), JSON.stringify({ model: imageModel,
+      prompt: request.prompt, size, output_format: "png", response_format: "url", watermark: false }));
+    if (result.model !== imageModel || !Array.isArray(result.data) || result.data.length !== 1) throw new Error("方舟图片响应模型或数量不匹配，须核对费用，不能重提");
+    const output = object(result.data[0]);
+    if (output.error || output.output_format && output.output_format !== "png") throw new Error("方舟图片生成失败或原图格式不符，请核对费用");
+    if (typeof result.created !== "number" || typeof output.size !== "string" || output.size !== size) throw new Error("方舟图片时间或尺寸回执无效，请核对原任务");
+    const data: ProviderTaskData = { kind: "arkImage", version: 1, model: imageModel, mode: "textToImage",
+      created: result.created, url: httpsUrl(output.url), size: output.size, requestedSize: size };
+    if (result.usage && typeof result.usage === "object" && !Array.isArray(result.usage)) data.usage = Object.fromEntries(
+      Object.entries(result.usage).filter(([, value]) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0));
+    const assets = imageReceipt(data);
+    await this.saveTaskData(data);
+    return assets;
+  },
   async generateVideo(request: ReferencedVideoRequest): Promise<MediaAsset[]> {
     apiKey(this);
     if (!this.saveTaskData) throw new Error("方舟视频须通过可持久化的媒体任务提交，缺少任务保存能力");
@@ -165,6 +198,7 @@ export default {
     return pollVideo(this, data, signal);
   },
   async resumeTask(data: ProviderTaskData): Promise<MediaAsset[]> {
+    if (data.kind === "arkImage") return imageReceipt(data);
     if (data.kind !== "arkVideo" || data.version !== 1 || data.model !== videoModel) throw new Error("方舟任务恢复数据无效");
     taskId(data.taskId);
     apiKey(this);

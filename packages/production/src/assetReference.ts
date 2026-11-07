@@ -1,19 +1,31 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { ProductionCatalog } from "./catalog";
+import { serializeHostMediaRequest } from "./store";
 
 export type ReferenceRole = "headshot" | "fullBody" | "scene" | "prop" | "costume";
+export type GeneratedReferenceOrigin = { taskId: string; modelId: string; generatedAt: number; credentialScope: string;
+  method: "textToImage"; originalSha256: string };
 export type AssetReference = { id: string; projectId: string; entityKind: "asset" | "scene"; entityId: string;
   entityHash: string; role: ReferenceRole; version: number; previousId: string | null; path: string;
   sha256: string; mimeType: string; width: number; height: number; sourceNote: string;
-  sourceKind: "user_authorized"; createdAt: number };
+  sourceKind: "user_authorized"; createdAt: number; origin?: GeneratedReferenceOrigin };
 export type ReferenceTarget = { entityKind: "asset" | "scene"; entityId: string; name: string; kind: string;
   description: string; locked: boolean; entityHash: string; roles: ReferenceRole[] };
 
 export function listAssetReferences(catalog: ProductionCatalog, projectId: string): AssetReference[] {
-  return catalog.db.query(`SELECT id, project_id AS projectId, entity_kind AS entityKind, entity_id AS entityId,
+  const references = catalog.db.query(`SELECT id, project_id AS projectId, entity_kind AS entityKind, entity_id AS entityId,
     entity_hash AS entityHash, role, version, previous_id AS previousId, path, sha256, mime_type AS mimeType,
     width, height, source_note AS sourceNote, source_kind AS sourceKind, created_at AS createdAt
     FROM asset_reference WHERE project_id = ? ORDER BY version DESC, id`).all(projectId) as AssetReference[];
+  const origins = catalog.db.query(`SELECT o.reference_id AS referenceId, o.task_id AS taskId, o.model_id AS modelId,
+    o.generated_at AS generatedAt, o.credential_scope AS credentialScope, o.method, o.original_sha256 AS originalSha256
+    FROM asset_reference_origin o JOIN asset_reference r ON r.id = o.reference_id WHERE r.project_id = ?`).all(projectId) as Array<GeneratedReferenceOrigin & { referenceId: string }>;
+  return references.map(reference => {
+    const origin = origins.find(item => item.referenceId === reference.id);
+    if (!origin) return reference;
+    const { referenceId, ...evidence } = origin;
+    return { ...reference, origin: evidence };
+  });
 }
 
 export function listReferenceTargets(catalog: ProductionCatalog, projectId: string): ReferenceTarget[] {
@@ -38,13 +50,16 @@ export type BindReferenceInput = { projectId: string; entityKind: "asset" | "sce
   sourceNote: string; file: { path: string; sha256: string; mimeType: string; width: number; height: number } };
 
 /** File metadata comes only from the host's validated, preserved original bytes. */
-export function bindAssetReference(catalog: ProductionCatalog, input: BindReferenceInput) {
+export function bindAssetReference(catalog: ProductionCatalog, input: BindReferenceInput, origin?: GeneratedReferenceOrigin) {
   if (input.rightsConfirmed !== true || !input.sourceNote.trim() || input.sourceNote.length > 2000) throw new Error("请确认图片使用权并记录来源");
   const file = input.file;
   if (!/^[a-f0-9]{64}$/.test(file.sha256) || !["image/png", "image/jpeg", "image/webp"].includes(file.mimeType)
     || !Number.isSafeInteger(file.width) || !Number.isSafeInteger(file.height) || file.width < 1 || file.height < 1
     || file.width > 8192 || file.height > 8192 || file.width * file.height > 40_000_000
     || file.path !== `assets/productionReferences/${file.sha256}.${({ "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" } as Record<string, string>)[file.mimeType]}`) throw new Error("参考图文件信息无效");
+  if (origin && (origin.method !== "textToImage" || !origin.taskId || origin.modelId !== "doubao-seedream-5-0-pro-260628"
+    || !Number.isSafeInteger(origin.generatedAt) || origin.generatedAt < 1 || origin.generatedAt > Date.now() + 300_000
+    || !/^[a-f0-9]{64}$/.test(origin.credentialScope) || origin.originalSha256 !== file.sha256)) throw new Error("模型原图来源证据无效");
   return catalog.withTransaction(() => {
     const target = listReferenceTargets(catalog, input.projectId)
       .find(item => item.entityKind === input.entityKind && item.entityId === input.entityId);
@@ -56,6 +71,7 @@ export function bindAssetReference(catalog: ProductionCatalog, input: BindRefere
     if (current && current.sha256 === file.sha256 && current.entityHash === input.entityHash
       && current.sourceNote === input.sourceNote.trim()
       && (current.id === input.expectedReferenceId || current.previousId === input.expectedReferenceId)) {
+      if (serializeHostMediaRequest(current.origin ?? null) !== serializeHostMediaRequest(origin ?? null)) throw new Error("不能改变既有原图的生成来源");
       return { reference: current, created: false };
     }
     if ((current?.id ?? null) !== input.expectedReferenceId) throw new Error("参考图版本已变化，请刷新并确认要替换的图片");
@@ -66,6 +82,9 @@ export function bindAssetReference(catalog: ProductionCatalog, input: BindRefere
       .run(id, input.projectId, input.entityKind, input.entityId, input.entityHash, input.role,
         (current?.version ?? 0) + 1, current?.id ?? null, file.path, file.sha256, file.mimeType,
         file.width, file.height, input.sourceNote.trim(), Date.now());
+    if (origin) catalog.db.query(`INSERT INTO asset_reference_origin(reference_id, task_id, model_id, generated_at,
+      credential_scope, method, original_sha256) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, origin.taskId, origin.modelId, origin.generatedAt, origin.credentialScope, origin.method, origin.originalSha256);
     return { reference: listAssetReferences(catalog, input.projectId).find(item => item.id === id)!, created: true };
   });
 }

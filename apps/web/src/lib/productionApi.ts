@@ -6,6 +6,10 @@ export type AdaptationPreview = { planHash: string; estimatedCostMicros: number;
     targetSeconds: number; genre: string; visualStyle: string } };
 export type ProductionTextModel = { providerId: string; providerLabel: string; modelId: string; label: string; maxOutputTokens: number };
 export type ReferenceRole = "headshot" | "fullBody" | "scene" | "prop" | "costume";
+export type AssetImageRequest = { directory: string; projectId: string; entityKind: "asset" | "scene"; entityId: string; role: ReferenceRole; visualStyle: string };
+export type AssetImagePreview = { planHash: string; canSubmit: boolean; requestJson: string; destination: string; episodeNumber: number;
+  blockers: string[]; price: { amountMicros: number; sourceUrl: string } | null; adoptedReferenceId: string | null;
+  existingTask: { id: string; state: string; requestStarted: boolean } | null };
 export type AssetReference = { id: string; projectId: string; entityKind: "asset" | "scene"; entityId: string;
   entityHash: string; role: ReferenceRole; version: number; previousId: string | null; path: string;
   sha256: string; mimeType: string; width: number; height: number; sourceNote: string;
@@ -108,6 +112,21 @@ export type BudgetOverview = { global: BudgetUsage; globalHistory: BudgetChange[
 const client = axios.create({ baseURL: "/api/production", headers: { "x-toonflow-workspace": "1" } });
 
 const productionApi = {
+  async previewAssetImage(input: AssetImageRequest) {
+    const { data } = await client.post<{ data: AssetImagePreview }>("/previewAssetImage", input); return data.data;
+  },
+  async runAssetImage(input: AssetImageRequest, approval: { approved: true; maxCalls: 1; planHash: string; maxCostMicros: number }) {
+    const { data } = await client.post<{ data: { taskId: string; state: string; message: string } }>("/runAssetImage", { ...input, approval }); return data.data;
+  },
+  async recoverAssetImage(directory: string, projectId: string, taskId: string) {
+    const { data } = await client.post<{ data: { state: string; message: string } }>("/recoverAssetImage", { directory, projectId, taskId }); return data.data;
+  },
+  async readAssetImage(directory: string, projectId: string, taskId: string) {
+    const { data } = await client.get<Blob>("/readAssetImage", { params: { directory, projectId, taskId }, responseType: "blob" }); return data;
+  },
+  async adoptAssetImage(directory: string, projectId: string, taskId: string) {
+    await client.post("/adoptAssetImage", { directory, projectId, taskId, rightsConfirmed: true });
+  },
   async previewSegmentVideo(input: SegmentExecutionRequest) {
     const { data } = await client.post<{ data: SegmentExecutionPreview }>("/previewSegmentVideo", input); return data.data;
   },

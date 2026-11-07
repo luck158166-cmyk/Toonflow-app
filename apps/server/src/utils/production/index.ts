@@ -3,6 +3,21 @@ import { dirname, resolve } from "node:path";
 import { lstat, mkdir, realpath } from "@toonflow/file";
 import { ProductionCatalog, ProductionStore, indexNovel } from "@toonflow/production";
 export { createProjectBackup } from "./projectBackup";
+export async function inspectAssetImage(...args: Parameters<typeof import("./assetImages").inspectAssetImage>) {
+  return (await import("./assetImages")).inspectAssetImage(...args);
+}
+export async function executeAssetImage(...args: Parameters<typeof import("./assetImages").executeAssetImage>) {
+  return (await import("./assetImages")).executeAssetImage(...args);
+}
+export async function adoptAssetImage(...args: Parameters<typeof import("./assetImages").adoptAssetImage>) {
+  return (await import("./assetImages")).adoptAssetImage(...args);
+}
+export async function readAssetImage(...args: Parameters<typeof import("./assetImages").readAssetImage>) {
+  return (await import("./assetImages")).readAssetImage(...args);
+}
+export async function recoverProductionAssetImage(directory: string, projectId: string, taskId: string) {
+  return (await import("./mediaTasks")).recoverProductionMediaTask(directory, projectId, taskId, "image");
+}
 export async function inspectSegmentExecution(...args: Parameters<typeof import("./segmentExecution").inspectSegmentExecution>) {
   return (await import("./segmentExecution")).inspectSegmentExecution(...args);
 }

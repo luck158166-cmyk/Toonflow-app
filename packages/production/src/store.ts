@@ -75,7 +75,9 @@ export type TextTaskAuthorization = { approvedRequestHash: string; approvedPlanH
   maxCalls: 1; maxCostMicros: number; currency: "CNY"; maxOutputTokens: number;
   destination: string; contextWindow: number; maxOutputTokensLimit: number };
 export type MediaTaskAuthorization = { approvedRequestHash: string; approvedPlanHash: string; priceRuleId: string;
-  maxCalls: 1; maxCostMicros: number; currency: "CNY"; providerRevision?: string };
+  maxCalls: 1; maxCostMicros: number; currency: "CNY"; providerRevision?: string; credentialScope?: string;
+  assetTarget?: { entityKind: "asset" | "scene"; entityId: string; entityHash: string;
+    role: "headshot" | "fullBody" | "scene" | "prop" | "costume"; expectedReferenceId: string | null } };
 export type HostMediaBinding = { taskId: string; workspace: string; segmentKey: string;
   mediaType: "image" | "video" | "audio"; requestHash: string; authorization: MediaTaskAuthorization; launchClaimed: boolean };
 export type TaskPriceSnapshot = {
@@ -458,6 +460,7 @@ export class ProductionStore {
       || authorization.approvedRequestHash !== requestHash || !/^[a-f0-9]{64}$/.test(authorization.approvedPlanHash)
       || authorization.currency !== "CNY" || authorization.maxCalls !== 1 || !authorization.priceRuleId.trim()
       || (authorization.providerRevision !== undefined && !/^[a-f0-9]{64}$/.test(authorization.providerRevision))
+      || (authorization.credentialScope !== undefined && !/^[a-f0-9]{64}$/.test(authorization.credentialScope))
       || !Number.isSafeInteger(authorization.maxCostMicros) || authorization.maxCostMicros < 1) {
       throw new Error("媒体任务必须绑定工作区、片段、完整请求、方案及一次调用的人民币授权");
     }

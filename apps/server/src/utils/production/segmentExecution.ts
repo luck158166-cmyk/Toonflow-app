@@ -7,12 +7,13 @@ import { videoGenerationSchema } from "@/utils/media/schemas";
 import { withProduction } from "./index";
 import { readPreservedReference } from "./referenceImage";
 import { launchProductionVideoTask, recoverProductionVideoTask } from "./videoTasks";
+import { productionCredentialScope } from "./generationGate";
 
 async function modelStatus(): Promise<SegmentModelStatus> {
   const key: unknown = conf.get("settings.mediaProviderConfigs.volcengine.apiKey");
   try {
     const provider = await getMediaProvider("volcengine");
-    return { revision: provider.revision, configured: typeof key === "string" && !!key.trim(),
+    return { revision: provider.revision, credentialScope: productionCredentialScope(key), configured: typeof key === "string" && !!key.trim(),
       available: provider.id === "volcengine" && provider.models.some(model => model.type === "video" && model.id === "doubao-seedance-2-5-260628") };
   } catch { return { revision: "", available: false, configured: typeof key === "string" && !!key.trim() }; }
 }
@@ -78,7 +79,7 @@ export async function executeSegmentVideo(workspace: string, input: SegmentExecu
     { workspace: directory, segmentKey: `片段 ${input.sequence} · ${input.inputHash.slice(0, 12)}`, mediaType: "video",
       authorization: { approvedRequestHash: createHash("sha256").update(preview.requestJson).digest("hex"),
         approvedPlanHash: preview.planHash, priceRuleId: preview.price!.ruleId, maxCalls: 1,
-        maxCostMicros: approval.maxCostMicros, currency: "CNY", providerRevision: model.revision } });
+        maxCostMicros: approval.maxCostMicros, currency: "CNY", providerRevision: model.revision, credentialScope: model.credentialScope } });
   });
   if (dispatch.status === "budget_exhausted") return { taskId: dispatch.task.id, state: "queued", message: "预算不足，任务尚未提交；调整预算后可继续同一任务" };
   if (dispatch.status !== "started") return { taskId: dispatch.task.id, ...await recoverProductionVideoTask(directory, input.projectId, dispatch.task.id) };

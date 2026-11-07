@@ -5,7 +5,7 @@ import { serializeHostMediaRequest, type ProductionStore } from "./store";
 
 export type SegmentExecutionInput = { projectId: string; episodeId: string; sequence: number; inputHash: string };
 export type SegmentPreflightReview = { id: string; note: string; reviewedBy: string; createdAt: number };
-export type SegmentModelStatus = { revision: string; available: boolean; configured: boolean };
+export type SegmentModelStatus = { revision: string; available: boolean; configured: boolean; credentialScope?: string };
 export const segmentVideoPriceUnit = "seedance25NoVideo1080SecondCeiling";
 export const segmentVideoDestination = "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks";
 const hash = (value: unknown) => createHash("sha256").update(serializeHostMediaRequest(value)).digest("hex");
@@ -72,7 +72,7 @@ export function previewSegmentExecution(catalog: ProductionCatalog, store: Produ
     if (quote.currency !== "CNY" || quote.amountMicros < 1) throw new Error("请确认有效的人民币视频保守秒价");
     price = { ruleId: quote.rule.id, estimatedCostMicros: quote.amountMicros, sourceUrl: quote.rule.sourceUrl, unit: segmentVideoPriceUnit, quantity: request.duration };
   } catch (cause) { blockers.push({ code: "price", message: `缺少适用的视频价格：${cause instanceof Error ? cause.message : "报价失败"}` }); }
-  const basis = { ...input, reviewId: review?.id ?? null, modelRevision: model.revision, requestJson, price, destination: segmentVideoDestination };
+  const basis = { ...input, reviewId: review?.id ?? null, modelRevision: model.revision, credentialScope: model.credentialScope, requestJson, price, destination: segmentVideoDestination };
   const existing = store.findTaskByIdempotencyKey(segmentTaskKey(input));
   return { ...basis, planHash: hash(basis), review, checks, blockers, canSubmit: blockers.length === 0,
     savedVersion: saved?.version ?? null, references: segment.references, timeline: segment.timeline,

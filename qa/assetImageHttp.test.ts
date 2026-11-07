@@ -1,0 +1,20 @@
+import { expect, it } from "bun:test";
+import { mkdtempSync, readFileSync } from "@toonflow/file";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+it("generates one original through actual HTTP and native tasks, preserves source, adopts once and protects changed bytes", async () => {
+  const root = mkdtempSync(join(tmpdir(), "assetImage"));
+  const child = Bun.spawn([process.execPath, resolve("qa/assetImageScenario.ts"), root], { stdout: "pipe", stderr: "pipe" });
+  const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+  if (code) throw new Error(stdout + stderr);
+  const result = JSON.parse(readFileSync(join(root, "result.json"), "utf8"));
+  expect(result.initial.body.data.canSubmit).toBe(true); expect(result.stale.status).toBe(409); expect(result.before).toEqual([]);
+  expect(result.runs.map((item: any) => item.status)).toEqual([200, 200]); expect(result.tasks).toHaveLength(1);
+  expect(result.recovered.body.data.state).toBe("succeeded"); expect(result.notConfirmed.status).toBe(400);
+  expect(result.adopted.status).toBe(200); expect(result.duplicate.body.data.created).toBe(false);
+  expect(result.references).toHaveLength(1); expect(result.references[0].origin.method).toBe("textToImage"); expect(result.preserved).toBe(true);
+  expect(result.repeat.body.data.taskId).toBe(result.tasks[0].id); expect(result.tampered.status).toBe(409); expect(result.crossProject.status).toBe(409);
+  expect(result.scopeError).toContain("凭据已变化"); expect(result.calls.filter((call: string) => call.startsWith("POST"))).toHaveLength(1);
+  expect(result.usage.reservedMicros).toBe(100); expect(result.usage.chargedMicros).toBe(0);
+  expect(JSON.stringify(result)).not.toContain("qaNeverRealKey"); console.log("资产 HTTP 验证目录：" + root);
+}, 120000);

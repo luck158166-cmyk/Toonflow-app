@@ -50,7 +50,7 @@
         </template>
 
         <template v-else-if="activeStage === 'assets'">
-          <section v-if="project" class="surfaceCard"><assetReferencePanel :directory="directory" :projectId="selectedStoryId" @changed="refreshProject" /></section>
+          <section v-if="project" class="surfaceCard"><assetReferencePanel :directory="directory" :projectId="selectedStoryId" @changed="refreshProject" @openCosts="openImageCosts" /></section>
           <div class="sectionHeading"><div><h2>人物与场景资产</h2><p>人物、服装、道具和场景独立保存，锁定的资产不能被提取候选覆盖。</p></div><el-button :disabled="!selectedStoryId" @click="refreshProject">刷新资产</el-button></div>
           <div v-if="!project" class="emptyStage">先在左侧故事列表中选择一个故事。</div>
           <template v-else><div class="metricGrid"><article class="metricCard"><span>人物</span><strong>{{ countAssets('character') }}</strong></article><article class="metricCard"><span>场景</span><strong>{{ project.scenes.length }}</strong></article><article class="metricCard"><span>道具与服装</span><strong>{{ countAssets('prop') + countAssets('costume') }}</strong></article></div><div class="assetGrid"><article v-for="asset in project.assets" :key="asset.id" class="surfaceCard assetCard"><div class="cardHeading"><strong>{{ asset.name }}</strong><el-tag size="small" :type="asset.locked ? 'warning' : 'info'">{{ asset.locked ? '已锁定' : assetKindLabel(asset.kind) }}</el-tag></div><p>{{ asset.stableDescription || '尚无稳定外观描述' }}</p><small>首次出现：{{ asset.firstAppearance || '待记录' }}</small></article><article v-for="scene in project.scenes" :key="scene.id" class="surfaceCard assetCard"><div class="cardHeading"><strong>{{ scene.name }}</strong><el-tag size="small">场景</el-tag></div><p>{{ scene.location || '地点待补充' }} · {{ scene.atmosphere || '氛围待补充' }}</p><small>{{ scene.timeWeather || '时间与天气待补充' }}</small></article></div><div v-if="!project.assets.length && !project.scenes.length" class="emptyStage">当前故事尚未建立人物或场景资产。</div></template>
@@ -170,6 +170,11 @@ function openVideoCosts() {
   activeStage.value = "costs";
   priceProvider.value = "volcengine"; priceModel.value = "doubao-seedance-2-5-260628";
   priceUnit.value = "seedance25NoVideo1080SecondCeiling"; priceUnitSize.value = 1; priceCurrency.value = "CNY"; priceAmount.value = "";
+}
+function openImageCosts() {
+  activeStage.value = "costs";
+  priceProvider.value = "volcengine"; priceModel.value = "doubao-seedream-5-0-pro-260628";
+  priceUnit.value = "seedream5ProSingleImageCeiling"; priceUnitSize.value = 1; priceCurrency.value = "CNY"; priceAmount.value = "";
 }
 function errorMessage(cause: unknown) {
   return axios.isAxiosError<{ message?: string }>(cause)

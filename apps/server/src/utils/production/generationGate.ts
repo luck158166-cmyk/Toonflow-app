@@ -20,13 +20,19 @@ export function assertProductionReferenceBytes(directory: string, path: string, 
   if (!match || createHash("sha256").update(bytes).digest("hex") !== match[1]) throw new Error("生产参考原图与授权内容不符，已阻止提交");
 }
 
-export async function assertProductionProviderRevision(directory: string | undefined, revision: string) {
+export function productionCredentialScope(key: unknown) {
+  const normalized = typeof key === "string" ? key.trim().replace(/^Bearer\s+/i, "").trim() : "";
+  return normalized ? createHash("sha256").update(`ark:${normalized}`).digest("hex") : undefined;
+}
+
+export async function assertProductionProviderRevision(directory: string | undefined, revision: string, apiKey?: unknown) {
   const context = submissionContext.getStore();
   if (!context || context.directory !== directory) return;
   const { withProduction } = await import("./index");
   await withProduction(directory, (_catalog, store) => {
-    const expected = store.getHostMediaBinding(context.taskId)?.authorization.providerRevision;
-    if (expected && expected !== revision) throw new Error("供应商代码已变化，当前授权不能提交");
+    const authorization = store.getHostMediaBinding(context.taskId)?.authorization;
+    if (authorization?.providerRevision && authorization.providerRevision !== revision) throw new Error("供应商代码已变化，当前授权不能提交");
+    if (authorization?.credentialScope && authorization.credentialScope !== productionCredentialScope(apiKey)) throw new Error("方舟凭据已变化，请重新检查素材来源与授权");
   });
 }
 

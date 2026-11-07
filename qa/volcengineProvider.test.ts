@@ -26,6 +26,28 @@ async function setup(reply: (input: string, init?: RequestInit) => Promise<Respo
   return { provider, calls, checkpoints };
 }
 
+it("persists one Seedream original response and recovers the URL without any generated-image resubmission", async () => {
+  const imageModel = "doubao-seedream-5-0-pro-260628";
+  const response = { model: imageModel, created: Math.floor(Date.now() / 1000), data: [{ url: "https://media.example.test/original.png", size: "1024x1024", output_format: "png" }], usage: { generated_images: 1 } };
+  const first = await setup(async () => Response.json(response));
+  const images = await first.provider.generateImage!({ model: imageModel, prompt: "单人正面头肩图", size: "1024x1024" });
+  expect(first.calls).toHaveLength(1);
+  expect(first.calls[0]!.url).toBe("https://ark.cn-beijing.volces.com/api/v3/images/generations");
+  expect(JSON.parse(String(first.calls[0]!.init?.body))).toEqual({ model: imageModel, prompt: "单人正面头肩图", size: "1024x1024", output_format: "png", response_format: "url", watermark: false });
+  expect(first.checkpoints[0]).toMatchObject({ kind: "arkImage", mode: "textToImage", created: response.created, usage: { generated_images: 1 } });
+  const resume = await setup(async () => { throw new Error("must not poll or post"); });
+  expect(await resume.provider.resumeTask!(first.checkpoints[0]!)).toEqual(images);
+  await expect(resume.provider.resumeTask!({ ...first.checkpoints[0]!, created: Math.floor(Date.now() / 1000) - 86401 })).rejects.toThrow("超过有效期");
+  expect(resume.calls).toHaveLength(0);
+  for (const patch of [{ model: "unknown" }, { size: "2K" }, { ratio: "9:16" }, { images: [{ type: "url", url: "https://example.test/image.png" }] }, { other: { n: 2 } }]) {
+    await expect(resume.provider.generateImage!({ model: imageModel, prompt: "头像", ...patch } as never)).rejects.toThrow();
+  }
+  expect(resume.calls).toHaveLength(0);
+  const unknown = await setup(async () => { throw new Error("lost image response"); });
+  await expect(unknown.provider.generateImage!({ model: imageModel, prompt: "头像" })).rejects.toThrow("lost image response");
+  expect(unknown.calls).toHaveLength(1); expect(unknown.checkpoints).toHaveLength(0);
+});
+
 it("loads native metadata and preserves original image bytes, numbering, receipt and usage", async () => {
   const bytes = await new Bun.Image(png).resize(320, 320).png().buffer();
   const original = Buffer.from(bytes).toString("base64");

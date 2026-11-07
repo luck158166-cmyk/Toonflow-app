@@ -37,10 +37,11 @@ if (new URLSearchParams(location.search).get("stage") === "videoTasks") {
   createApp({ render: () => h(shotPreparationPanel, { ...fixture,
     onOpenAssets: () => { document.querySelector("#notice")!.textContent = "已触发参考图库导航（QA）"; } }) }).mount("#app");
 } else if (new URLSearchParams(location.search).get("stage") === "references") {
-  document.querySelector("#notice")!.textContent = "参考图库验证 · 临时工作区真实读写 · 无模型调用";
+  document.querySelector("#notice")!.textContent = "参考图库验证 · 临时工作区真实读写 · 模型请求已拦截，图片为测试像素";
   const fixture = await (await fetch("/qa/referenceFixture")).json();
   const { default: assetReferencePanel } = await import("../apps/web/src/pages/production/assetReferencePanel.vue");
-  createApp({ render: () => h(assetReferencePanel, fixture) }).mount("#app");
+  const { createPinia } = await import("../apps/web/node_modules/pinia/dist/pinia.js");
+  createApp({ render: () => h(assetReferencePanel, fixture) }).use(createPinia()).mount("#app");
 } else if (new URLSearchParams(location.search).get("stage") === "review") {
   document.querySelector("#notice")!.textContent = "审核界面验证 · 页面内模拟，不写生产数据";
   const evidence = [{ sourceHash: "a".repeat(64), chapterSequence: 1, lineStart: 2, lineEnd: 2, quote: "林岚走进车站，拾起铜钥匙。" }];
