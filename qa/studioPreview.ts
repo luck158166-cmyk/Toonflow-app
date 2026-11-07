@@ -2,7 +2,12 @@ import { createApp, h } from "../apps/web/node_modules/vue/dist/vue.esm-bundler.
 import productionApi, { type EpisodeReview } from "../apps/web/src/lib/productionApi";
 import "../apps/web/node_modules/element-plus/dist/index.css";
 import dashboard from "../apps/web/src/pages/production/dashboard.vue";
-if (new URLSearchParams(location.search).get("stage") === "segments") {
+if (new URLSearchParams(location.search).get("stage") === "models") {
+  document.querySelector("#notice")!.textContent = "统一模型设置验证 · 真实供应商读取 · 未配置密钥，禁止生成";
+  const { default: mediaModel } = await import("../apps/web/src/components/settings/panels/mediaModel/index.vue");
+  const { createPinia } = await import("../apps/web/node_modules/pinia/dist/pinia.js");
+  createApp({ render: () => h(mediaModel) }).use(createPinia()).mount("#app");
+} else if (new URLSearchParams(location.search).get("stage") === "segments") {
   document.querySelector("#notice")!.textContent = "片段规划验证 · 临时工作区真实读写 · 无模型调用";
   const fixture = await (await fetch("/qa/referenceFixture")).json();
   const { default: segmentPlanPanel } = await import("../apps/web/src/pages/production/segmentPlanPanel.vue");

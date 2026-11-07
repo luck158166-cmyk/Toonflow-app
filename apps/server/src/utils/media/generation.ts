@@ -74,6 +74,9 @@ export async function listMediaModels(): Promise<MediaModel[]> {
       rules: model.rules,
       mode: model.mode, durationResolutionMap: model.durationResolutionMap, audio: model.audio,
       ...(model.type === "audio" ? { voices: model.voices } : {}),
+      ...(model.type === "video" ? {
+        imageRatios: imageOptions(model.imageRatios, /^(?:[1-9]\d{0,3}:[1-9]\d{0,3}|adaptive)$/),
+      } : {}),
       ...(model.type === "image" ? {
         imageSizes: imageOptions(Array.isArray(model.imageSizes) ? model.imageSizes : builtIn?.imageSizes, /^[^\u0000-\u001f\u007f]+$/),
         imageRatios: imageOptions(Array.isArray(model.imageRatios) ? model.imageRatios : builtIn?.imageRatios, /^[1-9]\d{0,3}:[1-9]\d{0,3}$/),
@@ -162,7 +165,7 @@ function resumableAssets(assets: MediaAsset[], mediaType: "image" | "video" | "a
 async function prepareRequest<T>(directory: string | undefined, mediaType: "image" | "video" | "audio", request: MediaGenerationRequest,
   read: (cwd: string, reference: MediaReference, type: string, signal?: AbortSignal) => Promise<T>, signal?: AbortSignal) {
   // ACT: 仅向已适配引用映射的内置供应商传递，其他第三方适配器仍接收原有公共参数。
-  const referenceOrder = mediaType === "video" && ["toonflow", "apiMart", "metaso", "compshare"].includes(request.providerId) ? request.referenceOrder : undefined;
+  const referenceOrder = mediaType === "video" && ["toonflow", "apiMart", "metaso", "compshare", "volcengine"].includes(request.providerId) ? request.referenceOrder : undefined;
   if (referenceOrder) {
     const media = { image: request.images, video: request.videos, audio: request.audios };
     for (const [index, reference] of referenceOrder.entries()) {

@@ -20,4 +20,3 @@ export * from "./synthesisWorker";
 export * from "./ffmpegSynthesis";
 export * from "./episodeQuality";
 export * from "./promptPolicy";
-export * from "./volcengineArkVideo";

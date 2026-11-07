@@ -165,9 +165,10 @@ const { generating, pendingRecovery, cancelling } = generationState;
 let generation: Promise<void> | undefined;
 let modelsRequest: Promise<void> | undefined;
 watch(generating, value => { if (!value && !disposed && !deleting.value && !models.value.length) void loadModels().catch(error => showNodeError(error, "模型读取失败")); });
-// ACT: 供应商未声明视频比例范围，沿用界面的通用比例，具体支持范围由供应商校验。
-const ratioOptions = ["16:9", "9:16", "1:1", "4:3", "3:4"];
+const defaultRatios = ["16:9", "9:16", "1:1", "4:3", "3:4"];
 const selectedModel = useNodeModelSelection(models, computed({ get: () => data.value.model, set: value => { data.value.model = value; } }));
+// ACT: 复用供应商的比例声明；旧供应商未声明时保持原选项。
+const ratioOptions = computed(() => selectedModel.value?.imageRatios?.length ? selectedModel.value.imageRatios : defaultRatios);
 useModelForm(data, selectedModel);
 const selectedMode = computed(() => selectedModel.value?.mode?.find((item) => JSON.stringify(item) === data.value.mode) as NodeVideoRequest["mode"]);
 const frameMode = computed(() => ["startEndRequired", "endFrameOptional", "startFrameOptional"].includes(String(selectedMode.value)));
@@ -217,7 +218,7 @@ watch([selectedModel, () => data.value.duration], ([choice]) => {
   if (!durations.includes(data.value.duration!)) data.value.duration = durations[0];
   const resolutions = getResolutions(choice, data.value.duration);
   if (!resolutions.includes(data.value.resolution)) data.value.resolution = resolutions[0] ?? "";
-  if (!ratioOptions.includes(data.value.ratio)) data.value.ratio = "9:16";
+  if (!ratioOptions.value.includes(data.value.ratio)) data.value.ratio = ratioOptions.value.includes("9:16") ? "9:16" : ratioOptions.value[0]!;
   if (choice.audio !== "optional") data.value.generateAudio = choice.audio === true;
 }, { flush: "sync" });
 const modelGroups = computed(() => groupNodeModels(models.value));
@@ -430,7 +431,7 @@ function getConfig() {
       other: data.value.other,
     },
     models: models.value,
-    ratios: ratioOptions,
+    ratios: ratioOptions.value,
     matchingModes: matchingModes.value,
   };
 }
@@ -455,7 +456,7 @@ nodeTools.register({
     modelId: z.string().min(1).optional(),
     duration: z.number().positive().optional(),
     resolution: z.string().min(1).optional(),
-    ratio: z.enum(ratioOptions).optional(),
+    ratio: z.string().regex(/^(?:[1-9]\d{0,3}:[1-9]\d{0,3}|adaptive)$/).optional(),
     mode: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]).optional(),
     generateAudio: z.boolean().optional(),
     other: z.record(z.string(), z.json()).optional(),

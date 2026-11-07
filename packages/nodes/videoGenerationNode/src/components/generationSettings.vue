@@ -75,6 +75,7 @@ function resolutionsFor(value: number | undefined) {
 }
 
 function ratioStyle(value: string) {
+  if (value === "adaptive") return { width: "16px", height: "16px" };
   const [width = 1, height = 1] = value.split(":").map(Number);
   return { width: `${16 * Math.min(width / height, 1)}px`, height: `${16 * Math.min(height / width, 1)}px` };
 }
