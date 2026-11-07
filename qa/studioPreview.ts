@@ -2,7 +2,14 @@ import { createApp, h } from "../apps/web/node_modules/vue/dist/vue.esm-bundler.
 import productionApi, { type EpisodeReview } from "../apps/web/src/lib/productionApi";
 import "../apps/web/node_modules/element-plus/dist/index.css";
 import dashboard from "../apps/web/src/pages/production/dashboard.vue";
-if (new URLSearchParams(location.search).get("stage") === "videoTasks") {
+if (new URLSearchParams(location.search).get("stage") === "videoAdoption") {
+  document.querySelector("#notice")!.textContent = "片段采用与合成验证 · 视频为本地色块和纯音 · 模型网络全拦截，无真实费用";
+  const fixture = await (await fetch("/qa/referenceFixture")).json();
+  const { default: videoTaskPanel } = await import("../apps/web/src/pages/production/videoTaskPanel.vue");
+  const { default: episodeTimelinePanel } = await import("../apps/web/src/pages/production/episodeTimelinePanel.vue");
+  const { createPinia } = await import("../apps/web/node_modules/pinia/dist/pinia.js");
+  createApp({ render: () => h("main", [h(videoTaskPanel, fixture), h(episodeTimelinePanel, fixture)]) }).use(createPinia()).mount("#app");
+} else if (new URLSearchParams(location.search).get("stage") === "videoTasks") {
   document.querySelector("#notice")!.textContent = "视频任务界面验证 · 页面内模拟，不发送模型请求";
   const { default: videoTaskPanel } = await import("../apps/web/src/pages/production/videoTaskPanel.vue");
   productionApi.recoverVideoTask = async () => ({ state: "reconcile_required", message: "供应商接单状态待核对，保留预留费用，不会重新生成。" });

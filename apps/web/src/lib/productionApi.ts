@@ -1,4 +1,15 @@
 import axios from "axios";
+export type SegmentVideoReview = { pictureConfirmed: true; continuityConfirmed: true; audioConfirmed: true; rightsConfirmed: true; note: string };
+export type VideoAdoption = { id: string; taskId: string; sequence: number; inputHash: string; version: number; createdAt: number;
+  evidence: { path: string; sha256: string; durationMs: number; width: number; height: number; videoCodec: string; audioCodec: string;
+    quality: { formatIssues: string[]; intervals: Array<{ kind: string; startSeconds: number; endSeconds: number }>; truncated: boolean } } };
+export type SegmentVideoCandidate = { taskId: string; episodeId: string; sequence: number; inputHash: string; planVersion: number;
+  shots: Array<{ shotId: string; sequence: number; title: string; start: number; end: number }>;
+  evidence: VideoAdoption["evidence"]; current: boolean; adoption: VideoAdoption | null; expectedAdoptionId: string | null; canAdopt: boolean; message: string };
+export type VideoTimeline = { projectId: string; episodeId: string; inputHash: string; durationMs: number; complete: boolean;
+  segments: Array<{ sequence: number; startMs: number; endMs: number; adoption: VideoAdoption | null;
+    shots: Array<{ shotId: string; sequence: number; title: string; startMs: number; endMs: number }> }>;
+  history: VideoAdoption[]; renders: Array<{ taskId: string; state: string; version: number; updatedAt: number }> };
 export type AdaptationInputSummary = { id: string; episodeNumber: number; sourceHash: string; templateVersion: string; createdAt: number };
 export type AdaptationRequest = { directory: string; projectId: string; inputId: string; providerId: string; modelId: string; maxOutputTokens: number };
 export type AdaptationPreview = { planHash: string; estimatedCostMicros: number; sourceUrl: string; destination: string;
@@ -248,6 +259,30 @@ const productionApi = {
   async recoverVideoTask(directory: string, projectId: string, taskId: string) {
     const { data } = await client.post<{ data: { state: string; message: string } }>("/recoverVideoTask", { directory, projectId, taskId });
     return data.data;
+  },
+  async inspectSegmentVideo(directory: string, projectId: string, taskId: string) {
+    const { data } = await client.post<{ data: SegmentVideoCandidate }>("/inspectSegmentVideo", { directory, projectId, taskId }, { timeout: 660000 });
+    return data.data;
+  },
+  async readSegmentVideo(directory: string, projectId: string, taskId: string) {
+    const { data } = await client.get<Blob>("/readSegmentVideo", { params: { directory, projectId, taskId }, responseType: "blob" });
+    return data;
+  },
+  async adoptSegmentVideo(directory: string, projectId: string, taskId: string, expectedAdoptionId: string | null, review: SegmentVideoReview) {
+    const { data } = await client.post<{ data: { adoption: VideoAdoption; created: boolean } }>("/adoptSegmentVideo", { directory, projectId, taskId, expectedAdoptionId, review }, { timeout: 660000 });
+    return data.data;
+  },
+  async getVideoTimeline(directory: string, projectId: string, episodeId: string) {
+    const { data } = await client.get<{ data: VideoTimeline }>("/getVideoTimeline", { params: { directory, projectId, episodeId } });
+    return data.data;
+  },
+  async runEpisodeRoughCut(directory: string, projectId: string, episodeId: string, inputHash: string) {
+    const { data } = await client.post<{ data: { taskId: string; state: string; message: string } }>("/runEpisodeRoughCut", { directory, projectId, episodeId, inputHash }, { timeout: 660000 });
+    return data.data;
+  },
+  async readEpisodeRoughCut(directory: string, projectId: string, taskId: string) {
+    const { data } = await client.get<Blob>("/readEpisodeRoughCut", { params: { directory, projectId, taskId }, responseType: "blob" });
+    return data;
   },
   async exportBackup(directory: string) {
     const { data } = await client.get<Blob>("/exportBackup", { params: { directory }, responseType: "blob" });

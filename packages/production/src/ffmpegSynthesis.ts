@@ -135,14 +135,14 @@ export class FfmpegSynthesis implements SynthesisPort {
       audioLabels.push("[bgm]");
     }
     filters.push(`${audioLabels.join("")}amix=inputs=${audioLabels.length}:duration=first:normalize=0,alimiter=limit=0.95:level=0[aout]`);
-    const subtitleSource = await verified(spec.subtitles);
-    const extension = extname(subtitleSource).toLowerCase();
-    if (![".srt", ".ass"].includes(extension)) throw new Error("Subtitles must be SRT or ASS.");
-    const subtitleCopy = join(root, `.render-${randomUUID()}${extension}`);
+    const subtitleSource = spec.subtitles ? await verified(spec.subtitles) : null;
+    const extension = subtitleSource ? extname(subtitleSource).toLowerCase() : "";
+    if (subtitleSource && ![".srt", ".ass"].includes(extension)) throw new Error("Subtitles must be SRT or ASS.");
+    const subtitleCopy = subtitleSource ? join(root, `.render-${randomUUID()}${extension}`) : null;
     const temporaryOutput = join(dirname(output), `.render-${randomUUID()}.mp4`);
-    await writeFile(subtitleCopy, await readFile(subtitleSource), { flag: "wx" });
+    if (subtitleCopy && subtitleSource) await writeFile(subtitleCopy, await readFile(subtitleSource), { flag: "wx" });
     try {
-      filters.push(`[vbase]subtitles=filename='${basename(subtitleCopy)}'[vout]`);
+      filters.push(subtitleCopy ? `[vbase]subtitles=filename='${basename(subtitleCopy)}'[vout]` : "[vbase]null[vout]");
       command.complexFilter(filters).outputOptions("-map", "[vout]", "-map", "[aout]", "-pix_fmt", "yuv420p",
         "-preset", "fast", "-crf", "20", "-movflags", "+faststart", "-threads", "2", "-filter_complex_threads", "1")
         .videoCodec("libx264").audioCodec("aac").audioBitrate(192).duration(seconds).format("mp4").output(temporaryOutput);
@@ -160,7 +160,7 @@ export class FfmpegSynthesis implements SynthesisPort {
       await link(temporaryOutput, output);
       return { sha256, quality, qualityReportPath };
     } finally {
-      await unlink(subtitleCopy);
+      if (subtitleCopy) await unlink(subtitleCopy);
       try { await unlink(temporaryOutput); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     }
   }

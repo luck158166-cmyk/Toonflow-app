@@ -56,9 +56,10 @@ export type EpisodeRenderSpec = {
   height: 1920;
   videoCodec: "h264";
   audioCodec: "aac";
-  clips: Array<{ shotId: string; taskId: string; slot: string; path: string; sha256: string; durationMs: number }>;
+  clips: Array<{ shotId: string; taskId: string; slot: string; path: string; sha256: string; durationMs: number;
+    segmentInput?: { inputHash: string; sequence: number } }>;
   audioTracks: Array<{ type: "dialogue" | "narration"; taskId: string; slot: string; path: string; sha256: string; startMs: number }>;
-  subtitles: { path: string; sha256: string; language: string };
+  subtitles: { path: string; sha256: string; language: string } | null;
   bgm: { path: string; sha256: string; gainDb: number } | null;
   outputPath: string;
 };
@@ -614,6 +615,7 @@ export class ProductionStore {
     }
     if (!Array.isArray(spec.clips) || spec.clips.length === 0) throw new TypeError("At least one completed clip is required.");
     const shotIds = new Set<string>();
+    const segmentTasks = new Set<string>();
     const inputPaths = new Set<string>();
     for (const clip of spec.clips) {
       if (!clip.shotId.trim() || shotIds.has(clip.shotId) || !Number.isSafeInteger(clip.durationMs)
@@ -623,10 +625,20 @@ export class ProductionStore {
       shotIds.add(clip.shotId);
       assertWorkspaceRelativePath(clip.path);
       inputPaths.add(artifactPathKey(clip.path));
+      if (clip.segmentInput) {
+        if (segmentTasks.has(clip.taskId)) throw new Error("A segment cannot be duplicated in one synthesis manifest.");
+        segmentTasks.add(clip.taskId);
+        const bound = this.getHostMediaBinding(clip.taskId)?.authorization.segmentInput;
+        if (!bound || bound.projectId !== spec.projectId || bound.episodeId !== spec.episodeId
+          || bound.inputHash !== clip.segmentInput.inputHash || bound.sequence !== clip.segmentInput.sequence
+          || JSON.parse(this.getTask(clip.taskId).requestJson).duration * 1000 !== clip.durationMs) {
+          throw new Error("Clip segment does not match its authorized production plan.");
+        }
+      }
       const source = this.db.query(`SELECT o.path, o.sha256 FROM media_output o
         JOIN generation_task t ON t.id = o.task_id WHERE o.task_id = ? AND o.slot = ?
-        AND t.project_id = ? AND t.episode_id = ? AND t.shot_id = ? AND t.state = 'succeeded'`)
-        .get(clip.taskId, clip.slot, spec.projectId, spec.episodeId, clip.shotId) as { path: string; sha256: string } | null;
+        AND t.project_id = ? AND t.episode_id = ? AND (? = 1 OR t.shot_id = ?) AND t.state = 'succeeded' AND t.stage = 'video'`)
+        .get(clip.taskId, clip.slot, spec.projectId, spec.episodeId, clip.segmentInput ? 1 : 0, clip.shotId) as { path: string; sha256: string } | null;
       if (!source || source.path !== clip.path || source.sha256 !== clip.sha256.toLowerCase()) {
         throw new Error(`Clip input is missing or changed for shot ${clip.shotId}.`);
       }
@@ -645,11 +657,13 @@ export class ProductionStore {
         throw new Error(`Audio input is missing or changed: ${track.path}.`);
       }
     }
-    assertWorkspaceRelativePath(spec.subtitles.path);
-    if (!/^[a-f0-9]{64}$/i.test(spec.subtitles.sha256) || !spec.subtitles.language.trim()) {
-      throw new TypeError("Subtitle input needs a language and SHA-256.");
+    if (spec.subtitles) {
+      assertWorkspaceRelativePath(spec.subtitles.path);
+      if (!/^[a-f0-9]{64}$/i.test(spec.subtitles.sha256) || !spec.subtitles.language.trim()) {
+        throw new TypeError("Subtitle input needs a language and SHA-256.");
+      }
+      inputPaths.add(artifactPathKey(spec.subtitles.path));
     }
-    inputPaths.add(artifactPathKey(spec.subtitles.path));
     if (spec.bgm) {
       assertWorkspaceRelativePath(spec.bgm.path);
       if (!/^[a-f0-9]{64}$/i.test(spec.bgm.sha256) || !Number.isFinite(spec.bgm.gainDb)
@@ -699,6 +713,10 @@ export class ProductionStore {
     if (!row) return null;
     return { taskId: row.task_id, projectId: row.project_id, episodeId: row.episode_id, version: row.version,
       spec: JSON.parse(row.spec_json) as EpisodeRenderSpec, inputSha256: row.input_sha256 };
+  }
+
+  getMediaOutput(taskId: string, slot: string) {
+    return this.db.query(`SELECT path, sha256 FROM media_output WHERE task_id = ? AND slot = ?`).get(taskId, slot) as { path: string; sha256: string } | null;
   }
 
   getEpisodeCostBreakdown(projectId: string, episodeId: string) {

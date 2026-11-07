@@ -1,0 +1,34 @@
+import { expect, it } from "bun:test";
+import { mkdtempSync, readFileSync } from "@toonflow/file";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+
+it.skipIf(!process.env.TOONFLOW_QA_FFMPEG_DIR)("adopts actual playable native video through HTTP, joins the segment timeline locally and preserves prior outputs", async () => {
+  const root = mkdtempSync(join(tmpdir(), "segmentVideo"));
+  const child = Bun.spawn([process.execPath, resolve("qa/segmentVideoScenario.ts"), root], { stdout: "pipe", stderr: "pipe" });
+  const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+  if (code) throw new Error(stdout + stderr);
+  const r = JSON.parse(readFileSync(join(root, "result.json"), "utf8"));
+  expect(r.before.body.data.complete).toBe(false); expect(r.incomplete.status).toBe(409);
+  expect(r.candidate.status).toBe(200); expect(r.candidate.body.data.canAdopt).toBe(true);
+  expect(r.candidate.body.data.evidence.width).toBe(1080); expect(r.candidate.body.data.evidence.height).toBe(1920);
+  expect(r.candidate.body.data.evidence.durationMs).toBeGreaterThanOrEqual(4000); expect(r.bytesEqual).toBe(true);
+  expect(r.wrongProject.status).toBe(409); expect(r.noReview.status).toBe(400); expect(r.conflict.status).toBe(409);
+  expect(r.adopted.map((item: any) => item.status)).toEqual([200, 200]);
+  expect(r.adopted.filter((item: any) => item.body.data.created)).toHaveLength(1);
+  expect(r.adopted[0].body.data.adoption.id).toBe(r.adopted[1].body.data.adoption.id); expect(r.second.status).toBe(200);
+  expect(r.timeline.body.data.complete).toBe(true); expect(r.timeline.body.data.history).toHaveLength(2);
+  expect(r.timeline.body.data.segments.map((item: any) => [item.startMs, item.endMs])).toEqual([[0, 4000], [4000, 8000]]);
+  expect(r.started.map((item: any) => item.status)).toEqual([200, 200]);
+  expect(r.started[0].body.data.taskId).toBe(r.started[1].body.data.taskId); expect(r.renderTask.state).toBe("succeeded");
+  expect(r.renderTask.billable).toBe(false); expect(r.report.formatIssues).toEqual([]); expect(r.report.durationSeconds).toBeCloseTo(8, 1);
+  expect(r.renderedOk).toBe(true); expect(r.repeated.body.data.taskId).toBe(r.renderTask.id);
+  expect(r.tampered.status).toBe(409); expect(r.tamperedAdopt.status).toBe(409);
+  expect(r.stale.body.data.current).toBe(false); expect(r.stale.body.data.canAdopt).toBe(false);
+  expect(r.afterChange.body.data.complete).toBe(false); expect(r.afterChange.body.data.history).toHaveLength(2);
+  expect(r.staleRender.status).toBe(409); expect(r.oldRenderedOk).toBe(true);
+  expect(r.invalid.status).toBe(409); expect(r.invalidAdopt.status).toBe(409);
+  expect(r.tasks.filter((item: any) => item.stage === "synthesis")).toHaveLength(1);
+  expect(r.calls.filter((call: string) => call.startsWith("POST"))).toHaveLength(3);
+  console.log("可播放视频采用与本地合成 QA：" + root);
+}, 180000);

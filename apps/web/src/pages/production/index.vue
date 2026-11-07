@@ -72,7 +72,7 @@
 
         <template v-else-if="activeStage === 'exports'">
           <div class="sectionHeading"><div><h2>成片管理</h2><p>合成与重新导出使用已有镜头产物，字幕或配乐修改不应重新付费生成视频。</p></div></div>
-          <section class="surfaceCard"><el-table :data="synthesisTasks" emptyText="尚无成片合成任务"><el-table-column prop="episodeId" label="分集 ID" minWidth="220" /><el-table-column prop="state" label="状态" width="150" /><el-table-column prop="outputCount" label="产物数量" width="110" /><el-table-column label="更新时间" minWidth="180"><template #default="{ row }">{{ new Date(row.updatedAt).toLocaleString() }}</template></el-table-column></el-table></section>
+          <episodeTimelinePanel v-if="project" :directory="directory" :projectId="selectedStoryId" :episodes="project.episodes" @changed="refreshProject" />
         </template>
 
         <template v-else-if="activeStage === 'costs'">
@@ -103,6 +103,7 @@ import episodeReviewPanel from "./episodeReviewPanel.vue";
 import assetReferencePanel from "./assetReferencePanel.vue";
 import studioSettings from "./studioSettings.vue";
 import videoTaskPanel from "./videoTaskPanel.vue";
+import episodeTimelinePanel from "./episodeTimelinePanel.vue";
 import shotPreparationPanel from "./shotPreparationPanel.vue";
 import segmentPlanPanel from "./segmentPlanPanel.vue";
 

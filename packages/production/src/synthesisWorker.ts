@@ -10,7 +10,7 @@ export async function runSynthesisTask(store: ProductionStore, taskId: string, s
   if (task.stage !== "synthesis" || task.provider !== "local-synth") throw new Error("Task is not a local synthesis job.");
   const exportRecord = store.getSynthesisExport(taskId);
   if (!exportRecord) throw new Error("Synthesis manifest is missing.");
-  if (task.state === "reconcile_required") store.retryLocalSynthesis(taskId);
+  if (task.state === "reconcile_required" || task.state === "failed") store.retryLocalSynthesis(taskId);
   const start = store.beginSubmission(taskId);
   if (start.status !== "started" && start.status !== "warning_90") return { status: start.status as "already_succeeded" | "already_dispatched" | "not_queued" | "budget_exhausted", task: start.task };
   try {

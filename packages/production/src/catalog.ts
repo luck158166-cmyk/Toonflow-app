@@ -257,6 +257,13 @@ export class ProductionCatalog {
         method TEXT NOT NULL CHECK(method = 'textToImage'), original_sha256 TEXT NOT NULL,
         UNIQUE(task_id)
       );
+      CREATE TABLE IF NOT EXISTS segment_video_adoption (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES production_project(id),
+        episode_id TEXT NOT NULL REFERENCES production_episode(id), plan_hash TEXT NOT NULL,
+        segment_sequence INTEGER NOT NULL CHECK(segment_sequence > 0), task_id TEXT NOT NULL,
+        version INTEGER NOT NULL CHECK(version > 0), snapshot_json TEXT NOT NULL, created_at INTEGER NOT NULL,
+        UNIQUE(episode_id, plan_hash, segment_sequence, version), UNIQUE(task_id)
+      );
     `);
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (3, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
@@ -277,6 +284,8 @@ export class ProductionCatalog {
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (11, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (12, ?) ON CONFLICT(version) DO NOTHING`)
+      .run(Date.now());
+    db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (13, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
   }
 

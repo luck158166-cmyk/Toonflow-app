@@ -4,6 +4,21 @@ import { lstat, mkdir, realpath } from "@toonflow/file";
 import { ProductionCatalog, ProductionStore, indexNovel } from "@toonflow/production";
 export { createProjectBackup } from "./projectBackup";
 export { productionCredentialScope } from "./generationGate";
+export async function startEpisodeRoughCut(...args: Parameters<typeof import("./episodeRenders").startEpisodeRoughCut>) {
+  return (await import("./episodeRenders")).startEpisodeRoughCut(...args);
+}
+export async function readEpisodeRoughCut(...args: Parameters<typeof import("./episodeRenders").readEpisodeRoughCut>) {
+  return (await import("./episodeRenders")).readEpisodeRoughCut(...args);
+}
+export async function inspectSegmentVideo(...args: Parameters<typeof import("./segmentVideos").inspectSegmentVideo>) {
+  return (await import("./segmentVideos")).inspectSegmentVideo(...args);
+}
+export async function readSegmentVideo(...args: Parameters<typeof import("./segmentVideos").readSegmentVideo>) {
+  return (await import("./segmentVideos")).readSegmentVideo(...args);
+}
+export async function adoptProductionSegmentVideo(...args: Parameters<typeof import("./segmentVideos").adoptProductionSegmentVideo>) {
+  return (await import("./segmentVideos")).adoptProductionSegmentVideo(...args);
+}
 export async function inspectAssetImage(...args: Parameters<typeof import("./assetImages").inspectAssetImage>) {
   return (await import("./assetImages")).inspectAssetImage(...args);
 }

@@ -64,6 +64,15 @@ it.skipIf(!toolsDirectory)("renders eight clips with native audio, extra audio, 
     expect(report.formatIssues).toEqual([]);
     expect(report.durationSeconds).toBeCloseTo(4, 1);
     expect((await runSynthesisTask(store, first.task.id, renderer)).status).toBe("already_succeeded");
+    const failedLocal = store.createSynthesisTask("renderFailure", { ...spec, outputPath: "exports/retried.mp4", subtitles: null });
+    const failure = await runSynthesisTask(store, failedLocal.task.id, { render: async () => { throw new Error("QA local disk failure"); } });
+    expect(failure.status).toBe("failed");
+    expect(store.getTask(failedLocal.task.id).state).toBe("failed");
+    const retried = await runSynthesisTask(store, failedLocal.task.id, renderer);
+    expect(retried.status).toBe("succeeded");
+    expect(store.getTask(failedLocal.task.id).attempt).toBe(2);
+    expect(store.getTask(failedLocal.task.id).billable).toBe(false);
+    for (const clip of clips) expect(store.getTask(clip.taskId).attempt).toBe(1);
     writeFileSync(join(root, "captions2.srt"), "1\n00:00:00,000 --> 00:00:04,000\nREVISED SUBTITLES - SAME SOURCE CLIPS\n");
     const revised = store.createSynthesisTask("render2", { ...spec, outputPath: "exports/revised.mp4",
       subtitles: { ...spec.subtitles, path: "captions2.srt", sha256: hash("captions2.srt") }, bgm: { ...spec.bgm!, gainDb: -24 } });
