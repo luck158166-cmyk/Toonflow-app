@@ -47,7 +47,8 @@ import { ElMessage } from "element-plus";
 import { computed, ref, watch } from "vue";
 import productionApi, { type Episode, type EpisodeCost, type Story } from "@/lib/productionApi";
 
-const props = defineProps<{ directory: string; stories: Story[] }>();
+const props = defineProps<{ directory: string; stories: Story[]; selectedProjectId?: string }>();
+const emit = defineEmits<{ changed: [] }>();
 const projectId = ref("");
 const episodeNumber = ref(1);
 const title = ref("");
@@ -70,8 +71,9 @@ const totals = computed(() => {
 });
 
 watch(() => props.stories, stories => {
-  if (!stories.some(story => story.id === projectId.value)) projectId.value = stories[0]?.id ?? "";
+  if (!stories.some(story => story.id === projectId.value)) projectId.value = props.selectedProjectId || stories[0]?.id || "";
 }, { immediate: true });
+watch(() => props.selectedProjectId, value => { if (value && value !== projectId.value) projectId.value = value; });
 watch(projectId, () => { selectedEpisode.value = null; cost.value = null; void loadEpisodes(); });
 watch(() => props.directory, () => { selectedEpisode.value = null; cost.value = null; void loadEpisodes(); });
 
@@ -105,6 +107,7 @@ async function createEpisode() {
     logline.value = "";
     episodeNumber.value = episode.episodeNumber + 1;
     await loadEpisodes();
+    emit("changed");
     ElMessage.success("分集已创建");
   } catch (cause) { showError(cause); }
   finally { saving.value = false; }

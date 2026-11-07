@@ -28,6 +28,11 @@ const router = createRouter({
       beforeEnter: () => publicWeb.value && !useWorkspaceStore().project ? { path: "/home", replace: true } : true,
       component: () => import("@/pages/workspace/index.vue"),
     },
+    {
+      path: "/production",
+      beforeEnter: () => !useWorkspaceStore().project?.directory ? { path: "/home", replace: true } : true,
+      component: () => import("@/pages/production/index.vue"),
+    },
     adminRoute,
   ],
 });

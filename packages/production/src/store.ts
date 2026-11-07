@@ -600,6 +600,23 @@ export class ProductionStore {
         units: number | null; unitPriceMicros: number | null; createdAt: number }>;
   }
 
+  listProjectTasks(projectId: string) {
+    if (!projectId.trim()) throw new TypeError("Project ID is required.");
+    return this.db.query(`SELECT t.id, t.episode_id AS episodeId, t.shot_id AS shotId, t.stage,
+      t.provider, t.model_id AS modelId, t.state, t.billable,
+      t.estimated_cost_micros AS estimatedCostMicros, t.currency,
+      COALESCE(r.amount_micros, 0) AS reservedMicros,
+      COALESCE((SELECT SUM(c.amount_micros) FROM cost_ledger c WHERE c.task_id = t.id), 0) AS chargedMicros,
+      (SELECT COUNT(*) FROM media_output o WHERE o.task_id = t.id) AS outputCount,
+      t.created_at AS createdAt, t.updated_at AS updatedAt
+      FROM generation_task t LEFT JOIN task_reservation r ON r.task_id = t.id AND r.state = 'active'
+      WHERE t.project_id = ? ORDER BY t.created_at DESC, t.id DESC`).all(projectId) as Array<{
+        id: string; episodeId: string; shotId: string | null; stage: TaskStage; provider: string;
+        modelId: string; state: TaskState; billable: number; estimatedCostMicros: number;
+        currency: string; reservedMicros: number; chargedMicros: number; outputCount: number;
+        createdAt: number; updatedAt: number }>;
+  }
+
   enqueueMediaDownload(taskId: string, slot: string, remoteUrl: string, destinationPath: string,
     expiresAt: number, now = Date.now()) {
     if (!slot.trim() || !destinationPath.trim()) throw new TypeError("Download slot and destination path are required.");

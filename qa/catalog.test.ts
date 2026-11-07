@@ -34,6 +34,33 @@ describe("structured production catalog", () => {
     db.close();
   });
 
+  it("builds a workbench snapshot without mixing stories or losing structured evidence", () => {
+    const db = new Database(":memory:");
+    try {
+      const catalog = new ProductionCatalog(db);
+      const first = catalog.importStory({ title: "甲", sourceKind: "novel", sourceText: "甲原文" });
+      const second = catalog.importStory({ title: "乙", sourceKind: "script", sourceText: "乙原文" });
+      catalog.saveStoryAnalysis(first, { events: [{ evidence: "甲原文" }], relations: [] }, 1);
+      const episodeId = catalog.createEpisode(first, 1, "第一集");
+      catalog.saveEpisodeOutline(episodeId, ["开场", "发现线索"]);
+      catalog.saveEpisodeScript(episodeId, [{ scene: "灯塔", dialogue: ["有人吗？"] }]);
+      const sceneId = catalog.upsertScene({ projectId: first, name: "灯塔", evidence: ["海边灯塔"] });
+      catalog.upsertAsset({ projectId: first, kind: "character", name: "小林", evidence: ["小林走来"] });
+      catalog.createShot({ projectId: first, episodeId, sequence: 1, sceneId,
+        title: "抵达", scriptExcerpt: "小林走向灯塔", evidence: ["小林走来"] });
+      catalog.createEpisode(second, 1, "乙第一集");
+      expect(catalog.getProjectProduction(first)).toMatchObject({
+        analysis: { events: [{ evidence: "甲原文" }] },
+        episodes: [{ outline: ["开场", "发现线索"], script: [{ scene: "灯塔" }] }],
+        assets: [{ name: "小林", evidence: ["小林走来"] }],
+        scenes: [{ name: "灯塔", evidence: ["海边灯塔"] }],
+        shots: [{ title: "抵达", evidence: ["小林走来"] }],
+      });
+      expect(catalog.getProjectProduction(second).episodes.map(episode => episode.title)).toEqual(["乙第一集"]);
+      expect(catalog.getProjectProduction(second).shots).toEqual([]);
+    } finally { db.close(); }
+  });
+
   it("imports a story and prepares an eight-shot episode with characters, scenes, evidence and separated states", () => {
     const db = new Database(":memory:");
     new ProductionStore(db);

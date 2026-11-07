@@ -11,6 +11,23 @@ export type EpisodeCost = { episode: Episode; breakdown: Array<{ shotId: string 
     sourceRef: string; amountMicros: number; currency: string; status: "reconciled" | "manual";
     pricingRef: string | null; unit: string | null; units: number | null; unitPriceMicros: number | null;
     createdAt: number }> };
+export type ProjectProduction = { story: StoryDetail;
+  analysis: { events: unknown[]; relations: unknown[]; version: number; updatedAt: number } | null;
+  episodes: Array<Episode & { outline: string[]; script: unknown[] }>;
+  assets: Array<{ id: string; kind: "character" | "prop" | "costume"; name: string;
+    aliases: string[]; stableDescription: string; evidence: unknown[]; firstAppearance: string;
+    variantOf: string | null; locked: boolean }>;
+  scenes: Array<{ id: string; name: string; location: string; atmosphere: string;
+    timeWeather: string; evidence: unknown[]; locked: boolean }>;
+  shots: Array<{ id: string; episodeId: string; episodeNumber: number; sequence: number;
+    sceneId: string | null; title: string; scriptExcerpt: string; evidence: unknown[];
+    shotSize: string; cameraAngle: string; movement: string; durationMs: number;
+    promptText: string; promptVersion: number; reviewState: string; runtimeState: string;
+    videoReadiness: string }>;
+  tasks: Array<{ id: string; episodeId: string; shotId: string | null; stage: string;
+    provider: string; modelId: string; state: string; billable: number;
+    estimatedCostMicros: number; currency: string; reservedMicros: number;
+    chargedMicros: number; outputCount: number; createdAt: number; updatedAt: number }> };
 export type PriceRule = { id: string; provider: string; modelId: string; unit: string; unitSize: number;
   unitPriceMicros: number; currency: string; sourceUrl: string; effectiveAt: number; recordedBy: string; createdAt: number };
 export type PriceRuleInput = Pick<PriceRule, "provider" | "modelId" | "unit" | "unitSize" | "unitPriceMicros" | "currency" | "sourceUrl" | "effectiveAt">;
@@ -49,6 +66,11 @@ const productionApi = {
   async getEpisodeCost(directory: string, projectId: string, episodeId: string) {
     const { data } = await client.get<{ data: EpisodeCost }>("/getEpisodeCost",
       { params: { directory, projectId, episodeId } });
+    return data.data;
+  },
+  async getProjectProduction(directory: string, projectId: string) {
+    const { data } = await client.get<{ data: ProjectProduction }>("/getProjectProduction",
+      { params: { directory, projectId } });
     return data.data;
   },
   async exportBackup(directory: string) {

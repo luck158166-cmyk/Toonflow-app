@@ -25,7 +25,7 @@
         :fileAction="performFileAction"
         :saveNode="saveDocumentNode" />
     </keep-alive>
-    <workspaceMenu class="workspaceMenu" @openSettings="settingsVisible = true" @openProduction="productionVisible = true" />
+    <workspaceMenu class="workspaceMenu" @openSettings="settingsVisible = true" @openProduction="router.push('/production')" />
     <div class="workspaceTools">
       <el-segmented :modelValue="activePanel" class="panelSwitcher" :options="panelOptions" size="small" aria-label="切换面板" @change="switchPanel">
         <template #default="{ item }">
@@ -112,7 +112,6 @@
     </div>
     <floatingAgent v-model="agentVisible" :inert="workspaceStore.projectLoadingVisible" @resize="agentWidth = $event" />
     <settings v-model="settingsVisible" />
-    <productionCenter v-if="workspaceStore.project?.directory" v-model="productionVisible" :directory="workspaceStore.project.directory" />
     <el-dialog v-model="contactVisible" :title="contactInfo.title" width="min(360px, calc(100vw - 32px))" alignCenter appendToBody>
       <div class="contactContent">
         <q-r-code
@@ -133,7 +132,7 @@
 <script setup lang="ts">
 import { translate } from "@toonflow/i18n/vue";
 import { computed, defineAsyncComponent, nextTick, onMounted, onScopeDispose, provide, ref, shallowRef, watch, type ComponentPublicInstance } from "vue";
-import { onBeforeRouteLeave } from "vue-router";
+import { onBeforeRouteLeave, useRouter } from "vue-router";
 import axios from "axios";
 import { IconVector, IconFileText, IconPointer, IconHandStop, IconPlus, IconSearch, IconHelp, IconBook, IconBug, IconBrandWechat, IconBriefcase } from "@tabler/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
@@ -146,12 +145,12 @@ import { useProviderBalances } from "@/lib/providerBilling";
 import canvasPanel from "./panels/canvas/canvasHost.vue";
 import type { DocumentNodeOptions } from "./panels/canvas/canvasFiles";
 import workspaceMenu from "./components/workspaceMenu.vue";
-import productionCenter from "./components/productionCenter.vue";
 import floatingAgent from "./components/floatingAgent.vue";
 
 const documentPanel = defineAsyncComponent(() => import("./panels/document/index.vue"));
 
 const activePanel = ref<"canvas" | "document">("canvas");
+const router = useRouter();
 const selectedTool = ref<"move" | "hand">("move");
 const sideButtonEvents = ["mousedown", "mouseup", "auxclick"] as const;
 // 鼠标侧键会直接触发原生历史导航，需在 DOM 事件阶段拦截，避免生成中的工作区被误关闭。
@@ -174,7 +173,6 @@ const panelOptions = [
 const agentVisible = ref(true);
 const agentWidth = ref(0);
 const settingsVisible = ref(false);
-const productionVisible = ref(false);
 const helpVisible = ref(false);
 const contactVisible = ref(false);
 const contactType = ref<"community" | "business">("community");

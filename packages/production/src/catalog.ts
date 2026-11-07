@@ -213,6 +213,57 @@ export class ProductionCatalog {
         reviewState: ReviewState; createdAt: number; updatedAt: number } | null;
   }
 
+  getProjectProduction(projectId: string) {
+    if (!projectId.trim()) throw new TypeError("Project ID is required.");
+    const analysisRow = this.db.query(`SELECT events_json AS eventsJson, relations_json AS relationsJson,
+      version, updated_at AS updatedAt FROM story_analysis WHERE project_id = ?`).get(projectId) as
+      | { eventsJson: string; relationsJson: string; version: number; updatedAt: number } | null;
+    const episodes = this.db.query(`SELECT id, episode_number AS episodeNumber, title, logline,
+      outline_json AS outlineJson, script_json AS scriptJson, review_state AS reviewState,
+      created_at AS createdAt, updated_at AS updatedAt FROM production_episode
+      WHERE project_id = ? ORDER BY episode_number`).all(projectId) as Array<{
+        id: string; episodeNumber: number; title: string; logline: string; outlineJson: string;
+        scriptJson: string; reviewState: ReviewState; createdAt: number; updatedAt: number }>;
+    const assets = this.db.query(`SELECT id, kind, name, aliases_json AS aliasesJson,
+      stable_description AS stableDescription, evidence_json AS evidenceJson,
+      first_appearance AS firstAppearance, variant_of AS variantOf, locked,
+      created_at AS createdAt, updated_at AS updatedAt FROM production_asset
+      WHERE project_id = ? ORDER BY kind, name`).all(projectId) as Array<{
+        id: string; kind: AssetKind; name: string; aliasesJson: string; stableDescription: string;
+        evidenceJson: string; firstAppearance: string; variantOf: string | null;
+        locked: number; createdAt: number; updatedAt: number }>;
+    const scenes = this.db.query(`SELECT id, name, location, atmosphere, time_weather AS timeWeather,
+      evidence_json AS evidenceJson, locked, created_at AS createdAt, updated_at AS updatedAt
+      FROM production_scene WHERE project_id = ? ORDER BY name`).all(projectId) as Array<{
+        id: string; name: string; location: string; atmosphere: string; timeWeather: string;
+        evidenceJson: string; locked: number; createdAt: number; updatedAt: number }>;
+    const shots = this.db.query(`SELECT s.id, s.episode_id AS episodeId, e.episode_number AS episodeNumber,
+      s.sequence, s.scene_id AS sceneId, s.title, s.script_excerpt AS scriptExcerpt,
+      s.evidence_json AS evidenceJson, s.shot_size AS shotSize, s.camera_angle AS cameraAngle,
+      s.movement, s.duration_ms AS durationMs, s.prompt_text AS promptText,
+      s.prompt_version AS promptVersion, s.review_state AS reviewState,
+      s.runtime_state AS runtimeState, s.video_readiness AS videoReadiness
+      FROM production_shot s JOIN production_episode e ON e.id = s.episode_id
+      WHERE s.project_id = ? ORDER BY e.episode_number, s.sequence`).all(projectId) as Array<{
+        id: string; episodeId: string; episodeNumber: number; sequence: number; sceneId: string | null;
+        title: string; scriptExcerpt: string; evidenceJson: string; shotSize: string;
+        cameraAngle: string; movement: string; durationMs: number; promptText: string;
+        promptVersion: number; reviewState: ReviewState; runtimeState: RuntimeState;
+        videoReadiness: VideoReadiness }>;
+    return {
+      analysis: analysisRow ? { events: JSON.parse(analysisRow.eventsJson) as unknown[],
+        relations: JSON.parse(analysisRow.relationsJson) as unknown[],
+        version: analysisRow.version, updatedAt: analysisRow.updatedAt } : null,
+      episodes: episodes.map(({ outlineJson, scriptJson, ...episode }) => ({ ...episode,
+        outline: JSON.parse(outlineJson) as string[], script: JSON.parse(scriptJson) as unknown[] })),
+      assets: assets.map(({ aliasesJson, evidenceJson, locked, ...asset }) => ({ ...asset,
+        aliases: JSON.parse(aliasesJson) as string[], evidence: JSON.parse(evidenceJson) as unknown[], locked: !!locked })),
+      scenes: scenes.map(({ evidenceJson, locked, ...scene }) => ({ ...scene,
+        evidence: JSON.parse(evidenceJson) as unknown[], locked: !!locked })),
+      shots: shots.map(({ evidenceJson, ...shot }) => ({ ...shot, evidence: JSON.parse(evidenceJson) as unknown[] })),
+    };
+  }
+
   saveEpisodeScript(episodeId: string, script: unknown[], reviewState: ReviewState = "draft") {
     if (!Array.isArray(script) || script.length === 0) throw new TypeError("Episode script must contain structured scenes.");
     this.db.query(`UPDATE production_episode SET script_json = ?, review_state = ?, updated_at = ? WHERE id = ?`)

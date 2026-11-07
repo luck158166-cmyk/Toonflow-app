@@ -32,6 +32,20 @@ function fixture() {
 }
 
 describe("production task safety", () => {
+  it("shows only the selected project's task summary without exposing request payloads", () => {
+    const { db, store } = fixture();
+    try {
+      const first = store.createTask(paidInput("project-list-first", 200)).task;
+      const second = store.createTask({ ...paidInput("project-list-second", 300), projectId: "project-2" }).task;
+      store.beginSubmission(first.id);
+      const summary = store.listProjectTasks("project-1");
+      expect(summary).toMatchObject([{ id: first.id, state: "dispatching", reservedMicros: 200 }]);
+      expect(summary.some(task => task.id === second.id)).toBe(false);
+      expect(JSON.stringify(summary)).not.toContain("storm lighthouse");
+      expect(store.listProjectTasks("project-2")).toMatchObject([{ id: second.id }]);
+    } finally { db.close(); }
+  });
+
   it("separates episode charges from active reservations and other episodes", () => {
     const { db, store } = fixture();
     try {
