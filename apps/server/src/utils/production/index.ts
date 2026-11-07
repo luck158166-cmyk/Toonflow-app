@@ -2,7 +2,6 @@ import { Database } from "bun:sqlite";
 import { dirname, resolve } from "node:path";
 import { lstat, mkdir, realpath } from "@toonflow/file";
 import { ProductionCatalog, ProductionStore } from "@toonflow/production";
-import conf from "@/utils/conf";
 
 async function prepareDirectory(parent: string, name: string) {
   const path = resolve(parent, name);
@@ -23,8 +22,43 @@ async function checkDatabaseFile(path: string) {
   }
 }
 
+const recoveredDataDirectories = new Set<string>();
+
+/** Run once before this process starts workers. In-flight paid submissions are never sent again. */
+export async function recoverProductionAfterRestart(dataDirectory: string) {
+  const root = await realpath(dataDirectory);
+  if (recoveredDataDirectories.has(root)) return null;
+  const productionDirectory = resolve(root, "production");
+  const folder = await lstat(productionDirectory).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  if (!folder) { recoveredDataDirectories.add(root); return null; }
+  if (!folder.isDirectory() || folder.isSymbolicLink()) {
+    throw Object.assign(new Error("生产数据目录必须是普通文件夹"), { status: 403 });
+  }
+  const path = resolve(productionDirectory, "global.db");
+  const info = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  if (!info) { recoveredDataDirectories.add(root); return null; }
+  await checkDatabaseFile(path);
+  const db = new Database(path);
+  try {
+    const store = new ProductionStore(db);
+    const tasks = store.recoverInterrupted();
+    const downloads = store.recoverInterruptedMediaDownloads();
+    recoveredDataDirectories.add(root);
+    return { tasks, downloads };
+  } finally {
+    db.close();
+  }
+}
+
 export async function withProduction<T>(workspaceDirectory: string,
   action: (catalog: ProductionCatalog, store: ProductionStore) => Promise<T> | T): Promise<T> {
+  const { default: conf } = await import("@/utils/conf");
   const productionDirectory = await prepareDirectory(workspaceDirectory, ".production");
   const globalDirectory = await prepareDirectory(dirname(conf.path), "production");
   const projectPath = resolve(productionDirectory, "production.db");

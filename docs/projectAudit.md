@@ -163,6 +163,8 @@ D:\Temp\claude\c88343a087018856\af42c4a0-6e61-4a5e-b5c2-5bcd9772db65\scratchpad\
 
 实际原文件修改（2026-11-07）：`apps/server/src/utils/media/generation.ts` 在统一供应商执行前检查生产工作区，`apps/server/src/utils/media/tasks.ts` 在新持久任务落盘前执行同一检查。新增判定逻辑独立放在 `apps/server/src/utils/production/generationGate.ts`；现阶段遇到生产故事一律拒绝旧生成路径，后续预算事务接入后需将此处改为经过授权的提交。
 
+实际原文件修改（2026-11-07）：`apps/server/src/app.ts` 在初始化配置后、开启请求服务前调用全局生产任务恢复。`apps/server/src/utils/production/index.ts` 增加恢复入口，并把配置模块加载延后到实际工作区操作，以便隔离验证。
+
 ## 七、D1–D9 决策建议
 
 以下建议已由用户确认采用；D8 的人民币限额仍须在真实调用前单独给出。
