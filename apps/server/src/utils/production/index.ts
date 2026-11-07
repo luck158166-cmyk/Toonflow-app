@@ -6,6 +6,9 @@ export { createProjectBackup } from "./projectBackup";
 export async function inspectShotPreparation(directory: string, catalog: ProductionCatalog, projectId: string, shotId: string) {
   return (await import("./shotPreparation")).inspectShotPreparation(directory, catalog, projectId, shotId);
 }
+export async function inspectEpisodeSegmentPlan(directory: string, catalog: ProductionCatalog, projectId: string, episodeId: string) {
+  return (await import("./shotPreparation")).inspectEpisodeSegmentPlan(directory, catalog, projectId, episodeId);
+}
 export async function preserveReferenceImage(directory: string, path: string, sha256: string) {
   return (await import("./referenceImage")).preserveReferenceImage(directory, path, sha256);
 }

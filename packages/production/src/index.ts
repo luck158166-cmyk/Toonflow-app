@@ -8,6 +8,7 @@ export * from "./assetReference";
 export * from "./shotPreparation";
 export * from "./shotDirection";
 export * from "./shotPrompt";
+export * from "./segmentPlan";
 export * from "./store";
 export * from "./globalBudgetCoordinator";
 export * from "./dispatcher";

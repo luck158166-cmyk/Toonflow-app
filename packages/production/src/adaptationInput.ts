@@ -7,8 +7,8 @@ export type AdaptationOptions = { episodeNumber: number; firstChapter: number; l
 
 /** Saves a complete, immutable model input. No network calls and no silent source truncation. */
 export function buildAdaptationInput(catalog: ProductionCatalog, projectId: string,
-  options: AdaptationOptions, responseSchema: unknown, templateVersion: "novelEpisode.v1" | "novelEpisode.v2" = "novelEpisode.v2") {
-  if (!["novelEpisode.v1", "novelEpisode.v2"].includes(templateVersion)) throw new Error("未知编剧模板版本");
+  options: AdaptationOptions, responseSchema: unknown, templateVersion: "novelEpisode.v1" | "novelEpisode.v2" | "novelEpisode.v3" = "novelEpisode.v3") {
+  if (!["novelEpisode.v1", "novelEpisode.v2", "novelEpisode.v3"].includes(templateVersion)) throw new Error("未知编剧模板版本");
   for (const value of [options.episodeNumber, options.firstChapter, options.lastChapter, options.targetSeconds]) {
     if (!Number.isSafeInteger(value) || value < 1) throw new Error("集号、章节和时长必须为正整数");
   }
@@ -46,7 +46,8 @@ export function buildAdaptationInput(catalog: ProductionCatalog, projectId: stri
     continuity: { priorEpisodes: priorEpisodes.map(item => ({ episodeNumber: item.episodeNumber,
       title: item.title, logline: item.logline, outline: item.outline, script: item.script })),
       assets: snapshot.assets, scenes: snapshot.scenes, propStates: [...propStates.values()] },
-    ...(templateVersion === "novelEpisode.v2" ? { directionInstructions: "为每镜填写 direction 创作字段：summary 是一句话事件概述，action 仅写可见动作与表情，positions 用统一人物名逐一给出起止位置、朝向和视线，camera 只选一个主运镜，environment 写光线和氛围，style 遵循 visualStyle，sound 只写环境或动作音效。不要在创作字段中填写或复述对白、音乐、字幕、素材编号、时间戳、内部 ID 或工具指令；对白只写在 dialogue 中，素材与时间由编译器插入。道具交接与动作、起止持有人一致；站位保持前后镜连续。无法确定的关键事实不要捏造。" } : {}),
+    ...(templateVersion !== "novelEpisode.v1" ? { directionInstructions: "为每镜填写 direction 创作字段：summary 是一句话事件概述，action 仅写可见动作与表情，positions 用统一人物名逐一给出起止位置、朝向和视线，camera 只选一个主运镜，environment 写光线和氛围，style 遵循 visualStyle，sound 只写环境或动作音效。不要在创作字段中填写或复述对白、音乐、字幕、素材编号、时间戳、内部 ID 或工具指令；对白只写在 dialogue 中，素材与时间由编译器插入。道具交接与动作、起止持有人一致；站位保持前后镜连续。无法确定的关键事实不要捏造。" } : {}),
+    ...(templateVersion === "novelEpisode.v3" ? { segmentInstructions: "每镜填写 sceneContext：sceneSequence 对应 script 数组从 1 开始的场次，同一地点不同时间或叙事场次也必须区分；sceneName 与该场 location 使用同一场景名称。复杂打斗、快速运动或独立特效标记 isolate=true 并说明 reason，其余 false。镜头按场次顺序排列；同场相邻镜头维持一致的 environment 与 style 描述。时长为整数秒，不为凑时长拆开完整动作。" } : {}),
     responseSchema,
   };
   const requestJson = JSON.stringify(request);

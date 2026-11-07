@@ -32,6 +32,8 @@ it("binds and reads preserved image bytes through actual local routes, rejects t
     app.use("/savePreparation", (await import("../apps/server/src/routes/production/saveShotPreparation")).default);
     app.use("/prompt", (await import("../apps/server/src/routes/production/getShotPrompt")).default);
     app.use("/savePrompt", (await import("../apps/server/src/routes/production/saveShotPrompt")).default);
+    app.use("/segments", (await import("../apps/server/src/routes/production/getSegmentPlan")).default);
+    app.use("/saveSegments", (await import("../apps/server/src/routes/production/saveSegmentPlan")).default);
     app.use((error: Error & { status?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => res.status(error.status ?? 500).json({ message: error.message }));
     server = app.listen(0, "127.0.0.1"); await new Promise<void>(resolve => server!.once("listening", resolve));
     const address = server.address(); if (!address || typeof address === "string") throw new Error("Missing port");
@@ -102,6 +104,19 @@ it("binds and reads preserved image bytes through actual local routes, rejects t
     const promptSaved = (await promptSavedResponse.json()).data;
     expect(promptSaved.version).toBe(1);
     expect((await (await savePrompt()).json()).data).toEqual({ ...promptSaved, created: false });
+    const segmentQuery = new URLSearchParams({ directory: workspace, projectId: fixture.projectId, episodeId: fixture.episodeId });
+    const segmentResponse = await fetch(base + "/segments?" + segmentQuery, { headers });
+    expect(segmentResponse.status).toBe(200);
+    const segmentPlan = (await segmentResponse.json()).data;
+    expect(segmentPlan.canSave).toBe(true); expect(segmentPlan.snapshot.segments).toHaveLength(1);
+    const segmentInput = { directory: workspace, projectId: fixture.projectId, episodeId: fixture.episodeId, inputHash: segmentPlan.inputHash };
+    const saveSegments = (input = segmentInput, origin = base) => fetch(base + "/saveSegments", { method: "POST", headers: { ...headers, origin }, body: JSON.stringify(input) });
+    expect((await saveSegments(segmentInput, "https://untrusted.example.test")).status).toBe(403);
+    expect((await saveSegments({ ...segmentInput, projectId })).status).toBe(409);
+    expect((await saveSegments({ ...segmentInput, inputHash: "e".repeat(64) })).status).toBe(409);
+    const segmentSavedResponse = await saveSegments(); expect(segmentSavedResponse.status).toBe(200);
+    const segmentSaved = (await segmentSavedResponse.json()).data;
+    expect((await (await saveSegments()).json()).data).toEqual({ ...segmentSaved, created: false });
     expect(await u.production.withProduction(workspace, (_catalog, store) => store.listProjectTasks(fixture.projectId))).toEqual([]);
     const archive = unzipSync(await u.production.createProjectBackup(workspace, root));
     expect(archive["workspace/" + first.path]).toEqual(new Uint8Array(bytes));
@@ -112,6 +127,8 @@ it("binds and reads preserved image bytes through actual local routes, rejects t
       expect(JSON.parse(manifest.content)).toEqual(prepared.snapshot);
       const promptManifest = snapshot.query("SELECT snapshot_json AS content FROM compiled_shot_prompt WHERE id = ?").get(promptSaved.id) as { content: string };
       expect(JSON.parse(promptManifest.content)).toEqual(compiled.snapshot);
+      const segmentManifest = snapshot.query("SELECT snapshot_json AS content FROM episode_segment_plan WHERE id = ?").get(segmentSaved.id) as { content: string };
+      expect(JSON.parse(segmentManifest.content)).toEqual(segmentPlan.snapshot);
     }
     finally { snapshot.close(); }
     writeFileSync(join(workspace, first.path), "tampered preserved file");
@@ -123,6 +140,9 @@ it("binds and reads preserved image bytes through actual local routes, rejects t
     const brokenPrompt = (await (await fetch(base + "/prompt?" + preparationQuery, { headers })).json()).data;
     expect(brokenPrompt.canSave).toBe(false); expect(brokenPrompt.fileIssues).toHaveLength(6);
     expect((await savePrompt()).status).toBe(409);
+    const brokenSegments = (await (await fetch(base + "/segments?" + segmentQuery, { headers })).json()).data;
+    expect(brokenSegments.canSave).toBe(false); expect(brokenSegments.fileIssues).toHaveLength(6);
+    expect((await saveSegments()).status).toBe(409);
     writeFileSync(join(workspace, "input.png"), bytes);
     expect((await post(input)).status).toBe(409);
     const references = await u.production.withProduction(workspace, catalog => listAssetReferences(catalog, projectId));

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { ProductionCatalog } from "./catalog";
-import { getShotPreparation } from "./shotPreparation";
+import { getShotPreparation, type ShotReferenceSlot } from "./shotPreparation";
 import { cameraMoves, validateShotDirection } from "./shotDirection";
 
 type PromptCheck = { code: string; state: "passed" | "failed" | "pending"; message: string };
@@ -8,9 +8,15 @@ const templateVersion = "seedance25Shot.v1";
 const audioConstraint = "只保留角色人声、环境音和动作音效；不要音乐、背景音乐、BGM、配乐、器乐、旋律、合成器音效、氛围铺底音。不要字幕。";
 const roleNames = { headshot: "面部参考", fullBody: "全身妆造参考", costume: "服装参考", scene: "场景参考", prop: "道具参考" };
 
-/** Single-shot compilation; does not authorize submission or pretend a segment planner exists. */
-export function compileShotPrompt(catalog: ProductionCatalog, projectId: string, shotId: string) {
-  const preparation = getShotPreparation(catalog, projectId, shotId);
+export function renderVideoPrompt(references: ShotReferenceSlot[], characterCount: number, summary: string, frames: string[], environment: string, style: string) {
+  const mappings = references.map(slot => `图片${slot.index}是${slot.name}的${roleNames[slot.role]}`).join("；");
+  return [`【素材】${mappings}。`, `【音频约束】${audioConstraint}`, `【概述】${summary}`, ...frames,
+    `【全片】${environment}；${style}。`,
+    `【约束】人物面部与参考图保持一致；画面只出现${characterCount}名已绑定角色，同一画面每个角色只出现一次，禁止同款分身、双胞胎；人物眼睛为正常人眼。不要字幕、不要水印、不要 Logo、不要文字。${audioConstraint}`].join("\n");
+}
+
+/** Reused by single-shot and segment compilers. No database writes or provider calls. */
+export function compilePreparedShot(preparation: ReturnType<typeof getShotPreparation>, startSeconds = 0) {
   const { shot, references, characters, dialogue, props } = preparation.snapshot;
   const checks: PromptCheck[] = preparation.issues.map(issue => ({ code: issue.code, state: "failed", message: issue.message }));
   const check = (code: string, valid: boolean, message: string) => checks.push({ code, state: valid ? "passed" : "failed", message });
@@ -29,7 +35,6 @@ export function compileShotPrompt(catalog: ProductionCatalog, projectId: string,
   check("P07", !dialogue.some(line => line.text.trim() && creativeText.includes(line.text.trim())), "创作段不重复对白；对白仅由代码从已审核原文插入");
   check("P09", !/(歇斯底里|撕心裂肺|暴怒|疯狂咆哮)/.test(creativeText + dialogue.map(line => line.emotion).join("")), "强烈情绪词须改为可见表演细节，不自动改写对白");
   check("P11", !/(音乐|BGM|配乐|器乐|旋律|合成器|氛围铺底|字幕|水印|logo)/i.test(creativeText), "创作段不能要求音乐、字幕或水印；统一约束由代码在首尾加入");
-  const mappings = references.map(slot => `图片${slot.index}是${slot.name}的${roleNames[slot.role]}`).join("；");
   const positions = direction?.positions.map(item => `${item.name}起始${item.start}；结束${item.end}`).join("。") ?? "";
   const propText = props.map(item => `${item.propName}：起始由${item.holderBeforeName || "无人"}持有，${item.stateBefore}；${item.interaction}；结束由${item.holderAfterName || "无人"}持有，${item.stateAfter}`).join("。");
   const lines = dialogue.map(line => {
@@ -37,13 +42,8 @@ export function compileShotPrompt(catalog: ProductionCatalog, projectId: string,
     const kind = line.kind === "dialogue" ? "台词" : ({ narration: "旁白", voiceover: "画外音", phone: "电话音" } as Record<string, string>)[line.kind] ?? "台词";
     return `${name}${kind}（${line.emotion || "自然"}）：${JSON.stringify(line.text)}`;
   });
-  const prompt = direction ? [
-    `【素材】${mappings}。`, `【音频约束】${audioConstraint}`,
-    `【概述】${direction.summary}`,
-    `0-${seconds}秒：${shot.shotSize}，${direction.camera}。${positions}。${direction.action}。${propText}。${lines.join("。")}${direction.sound ? `。<${direction.sound}>` : ""}`,
-    `【全片】${direction.environment}；${direction.style}。`,
-    `【约束】人物面部与参考图保持一致；画面只出现${characters.length}名已绑定角色，同一画面每个角色只出现一次，禁止同款分身、双胞胎；人物眼睛为正常人眼。不要字幕、不要水印、不要 Logo、不要文字。${audioConstraint}`,
-  ].join("\n") : "";
+  const frame = direction ? `${startSeconds}-${startSeconds + seconds}秒：${shot.shotSize}，${direction.camera}。${positions}。${direction.action}。${propText}。${lines.join("。")}${direction.sound ? `。<${direction.sound}>` : ""}` : "";
+  const prompt = direction ? renderVideoPrompt(references, characters.length, direction.summary, [frame], direction.environment, direction.style) : "";
   // Data must never add material numbers, timestamps, template headers or operational instructions.
   const dataText = [creativeText, ...references.map(item => item.name), shot.shotSize,
     ...dialogue.flatMap(line => [line.text, line.emotion, line.speakerName ?? ""]), propText].join("\n");
@@ -57,10 +57,15 @@ export function compileShotPrompt(catalog: ProductionCatalog, projectId: string,
       generateAudio: true, prompt, references: references.map(slot => ({ index: slot.index, referenceId: slot.reference?.id ?? null,
         sha256: slot.reference?.sha256 ?? null, role: slot.role, name: slot.name })) }, checks };
   const inputHash = createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
+  return { inputHash, snapshot, frame, canSave: !checks.some(item => item.state === "failed"), readyForGeneration: false as const };
+}
+
+export function compileShotPrompt(catalog: ProductionCatalog, projectId: string, shotId: string) {
+  const { frame, ...compiled } = compilePreparedShot(getShotPreparation(catalog, projectId, shotId));
   const history = catalog.db.query(`SELECT id, version, input_hash AS inputHash, created_at AS createdAt
     FROM compiled_shot_prompt WHERE project_id = ? AND shot_id = ? ORDER BY version DESC`).all(projectId, shotId) as
     Array<{ id: string; version: number; inputHash: string; createdAt: number }>;
-  return { inputHash, snapshot, history, canSave: !checks.some(item => item.state === "failed"), readyForGeneration: false as const };
+  return { ...compiled, history };
 }
 
 /** Host checks original bytes before saving; compilation never edits a shot's runtime/readiness state. */

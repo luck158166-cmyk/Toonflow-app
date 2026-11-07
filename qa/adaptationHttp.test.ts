@@ -63,7 +63,8 @@ it("uses actual HTTP routes and the host SDK with an intercepted wire, including
           durationMs: 5000, shotSize: "近景", movement: "固定", promptText: "", characterNames: ["林岚"], dialogue: [],
           direction: { summary: "林岚走进车站", action: "林岚走过门口，停下脚步", camera: "固定",
             positions: [{ name: "林岚", start: "在左侧门口面向候车厅", end: "在画面中央看向前方" }],
-            environment: "夜间车站灯光昏黄", style: "动画", sound: "脚步声" } }] };
+            environment: "夜间车站灯光昏黄", style: "动画", sound: "脚步声" },
+          sceneContext: { sceneSequence: 1, isolate: false, reason: "" } }] };
       const input = { directory: workspace, projectId, inputId: prepared.data.id, providerId: "qa-provider", modelId: "qa-text", maxOutputTokens: 8192 };
       const before = modelCalls;
       expect((await post("/preview", input, "https://untrusted.example.test")).status).toBe(403);

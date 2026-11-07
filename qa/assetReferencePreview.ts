@@ -17,17 +17,20 @@ globalThis.fetch = Object.assign(async (input: Parameters<typeof fetch>[0], init
   return originalFetch(input, init);
 }, originalFetch);
 const { default: u } = await import("../apps/server/src/utils");
-const preparationMode = process.argv.includes("--shots");
+const segmentMode = process.argv.includes("--segments");
+const preparationMode = process.argv.includes("--shots") || segmentMode;
 const imagePath = join(root, "qaPixel.png");
 const bytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aGEkAAAAASUVORK5CYII=", "base64");
 writeFileSync(imagePath, bytes); writeFileSync(join(directory, "input.png"), bytes);
 let shots: Array<{ id: string; episodeNumber: number; sequence: number; title: string }> = [];
+let episodes: Array<{ id: string; episodeNumber: number; title: string }> = [];
 const projectId = await u.production.withProduction(directory, async catalog => {
   if (preparationMode) {
     const fixture = createShotFixture(catalog);
     const file = await u.production.preserveReferenceImage(directory, "input.png", createHash("sha256").update(bytes).digest("hex"));
     bindFixtureImages(catalog, fixture.projectId, file);
     shots = catalog.getProjectProduction(fixture.projectId).shots;
+    episodes = catalog.getProjectProduction(fixture.projectId).episodes;
     return fixture.projectId;
   }
   const projectId = catalog.importStory({ title: "参考图界面验证", sourceKind: "synopsis", sourceText: "林岚在车站拾起钥匙。" });
@@ -38,12 +41,12 @@ const projectId = await u.production.withProduction(directory, async catalog => 
 });
 const app = express();
 app.use(express.json()); app.use(express.raw({ type: "application/octet-stream", limit: "21mb" }));
-app.get("/qa/referenceFixture", (_req, res) => res.json({ directory, projectId, ...(preparationMode ? { shots } : {}) }));
+app.get("/qa/referenceFixture", (_req, res) => res.json({ directory, projectId, ...(preparationMode ? { shots, episodes } : {}) }));
 app.use("/api", (req, res, next) => {
   if ((req.query.directory ?? req.body?.directory) !== directory) return res.status(403).json({ message: "QA workspace only" });
   next();
 });
-for (const name of ["getAssetReferences", "bindAssetReference", "readAssetReference", "getShotPreparation", "saveShotPreparation", "getShotPrompt", "saveShotPrompt"]) {
+for (const name of ["getAssetReferences", "bindAssetReference", "readAssetReference", "getShotPreparation", "saveShotPreparation", "getShotPrompt", "saveShotPrompt", "getSegmentPlan", "saveSegmentPlan"]) {
   app.use(`/api/production/${name}`, (await import(`../apps/server/src/routes/production/${name}.ts`)).default);
 }
 for (const name of ["list", "mkdir", "write"]) {
@@ -54,5 +57,5 @@ app.use((error: Error & { status?: number }, _req: express.Request, res: express
 const { createServer } = await import("../apps/web/node_modules/vite/dist/node/index.js");
 const vite = await createServer({ configFile: resolve("apps/web/vite.config.ts"), root: process.cwd(), server: { middlewareMode: true, hmr: false }, appType: "mpa" });
 app.use(vite.middlewares);
-const server = app.listen(5198, "127.0.0.1", () => console.log(JSON.stringify({ url: `http://127.0.0.1:5198/qa/studioPreview.html?stage=${preparationMode ? "preparation" : "references"}`, directory, projectId, imagePath })));
+const server = app.listen(5198, "127.0.0.1", () => console.log(JSON.stringify({ url: `http://127.0.0.1:5198/qa/studioPreview.html?stage=${segmentMode ? "segments" : preparationMode ? "preparation" : "references"}`, directory, projectId, imagePath })));
 process.on("SIGINT", async () => { await vite.close(); server.close(() => process.exit(0)); });

@@ -1,4 +1,17 @@
 export const cameraMoves = ["固定", "缓慢推进", "缓慢拉远", "横向跟拍", "缓慢摇镜"] as const;
+export type ShotSceneContext = { sceneSequence: number; isolate: boolean; reason: string };
+export function validateShotSceneContext(value: unknown, script: unknown[], sceneName: string): asserts value is ShotSceneContext {
+  const c = value as ShotSceneContext | null;
+  if (!c || typeof c !== "object" || Array.isArray(c)
+    || Object.keys(c).some(key => !["sceneSequence", "isolate", "reason"].includes(key))
+    || !Number.isSafeInteger(c.sceneSequence) || c.sceneSequence < 1 || c.sceneSequence > script.length
+    || typeof c.isolate !== "boolean" || typeof c.reason !== "string" || c.reason.length > 400
+    || c.isolate && !c.reason.trim()) throw new Error("镜头必须有有效场次归属；复杂动作独立生成须写明原因");
+  const scene = script[c.sceneSequence - 1] as { location?: unknown } | null;
+  if (!scene || typeof scene.location !== "string" || scene.location.trim().toLocaleLowerCase() !== sceneName.trim().toLocaleLowerCase()) {
+    throw new Error("镜头场次地点与引用场景不一致");
+  }
+}
 export type ShotDirection = {
   summary: string; action: string; camera: typeof cameraMoves[number];
   positions: Array<{ name: string; start: string; end: string }>;

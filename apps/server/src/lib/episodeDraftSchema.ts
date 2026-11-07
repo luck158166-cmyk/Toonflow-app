@@ -28,6 +28,7 @@ export const episodeDraftSchema = z.object({
     scriptExcerpt: text, evidence, durationMs: z.number().int().min(1).max(600000),
     shotSize: text, movement: text, promptText: text, characterNames: z.array(name).max(100),
     direction: direction.optional(),
+    sceneContext: z.object({ sceneSequence: z.number().int().positive(), isolate: z.boolean(), reason: z.string().max(400) }).strict().optional(),
     propUses: z.array(z.object({ name, holderBeforeName: name.optional(), holderAfterName: name.optional(),
       stateBefore: text, stateAfter: text, interaction: text, evidence }).strict()).max(100).optional(),
     dialogue: z.array(z.object({ kind: z.enum(["dialogue", "narration", "voiceover", "phone"]),
@@ -39,3 +40,5 @@ export const episodeDraftSchema = z.object({
 // New model inputs require director fields; historical drafts remain readable through the base schema.
 export const directedEpisodeSchema = episodeDraftSchema.extend({ shots: z.array(
   episodeDraftSchema.shape.shots.element.extend({ direction })).min(1).max(200) });
+export const segmentedEpisodeSchema = directedEpisodeSchema.extend({ shots: z.array(
+  directedEpisodeSchema.shape.shots.element.extend({ sceneContext: episodeDraftSchema.shape.shots.element.shape.sceneContext.unwrap() })).min(1).max(200) });

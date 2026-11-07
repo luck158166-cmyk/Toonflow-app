@@ -29,6 +29,13 @@ export type CompiledShotPrompt = { inputHash: string; canSave: boolean; readyFor
     requestDraft: { model: string; duration: number; ratio: string; resolution: string; prompt: string };
     checks: Array<{ code: string; state: "passed" | "failed" | "pending"; message: string }> } };
 export type SourceKind = "synopsis" | "novel" | "script";
+export type SegmentPlan = { inputHash: string; canSave: boolean; readyForGeneration: false;
+  fileIssues: Array<{ message: string }>; history: Array<{ id: string; version: number; inputHash: string; createdAt: number }>;
+  snapshot: { segments: Array<{ sequence: number; sceneSequence: number | null; boundaryReason: string;
+    timeline: Array<{ shotId: string; sequence: number; title: string; start: number; end: number }>;
+    references: Array<{ index: number; name: string; role: ReferenceRole; reference: AssetReference | null }>;
+    requestDraft: { duration: number; prompt: string };
+    checks: Array<{ code: string; state: "passed" | "failed" | "pending"; message: string }> }> } };
 export type Story = { id: string; title: string; sourceKind: SourceKind; workflowState: string; createdAt: number; updatedAt: number };
 export type StoryDetail = Story & { sourceText: string };
 export type StorySummary = { id: string; title: string; sourceKind: SourceKind; description: string;
@@ -94,6 +101,14 @@ export type BudgetOverview = { global: BudgetUsage; globalHistory: BudgetChange[
 const client = axios.create({ baseURL: "/api/production", headers: { "x-toonflow-workspace": "1" } });
 
 const productionApi = {
+  async getSegmentPlan(directory: string, projectId: string, episodeId: string) {
+    const { data } = await client.get<{ data: SegmentPlan }>("/getSegmentPlan", { params: { directory, projectId, episodeId } });
+    return data.data;
+  },
+  async saveSegmentPlan(directory: string, projectId: string, episodeId: string, inputHash: string) {
+    const { data } = await client.post<{ data: { id: string; version: number; created: boolean } }>("/saveSegmentPlan", { directory, projectId, episodeId, inputHash });
+    return data.data;
+  },
   async getShotPrompt(directory: string, projectId: string, shotId: string) {
     const { data } = await client.get<{ data: CompiledShotPrompt }>("/getShotPrompt", { params: { directory, projectId, shotId } });
     return data.data;

@@ -2,7 +2,12 @@ import { createApp, h } from "../apps/web/node_modules/vue/dist/vue.esm-bundler.
 import productionApi, { type EpisodeReview } from "../apps/web/src/lib/productionApi";
 import "../apps/web/node_modules/element-plus/dist/index.css";
 import dashboard from "../apps/web/src/pages/production/dashboard.vue";
-if (new URLSearchParams(location.search).get("stage") === "preparation") {
+if (new URLSearchParams(location.search).get("stage") === "segments") {
+  document.querySelector("#notice")!.textContent = "片段规划验证 · 临时工作区真实读写 · 无模型调用";
+  const fixture = await (await fetch("/qa/referenceFixture")).json();
+  const { default: segmentPlanPanel } = await import("../apps/web/src/pages/production/segmentPlanPanel.vue");
+  createApp({ render: () => h(segmentPlanPanel, { directory: fixture.directory, projectId: fixture.projectId, episodes: fixture.episodes }) }).mount("#app");
+} else if (new URLSearchParams(location.search).get("stage") === "preparation") {
   document.querySelector("#notice")!.textContent = "镜头资料验证 · 临时工作区真实读写 · 图片为测试像素";
   const fixture = await (await fetch("/qa/referenceFixture")).json();
   const { default: shotPreparationPanel } = await import("../apps/web/src/pages/production/shotPreparationPanel.vue");

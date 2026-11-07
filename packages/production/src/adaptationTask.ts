@@ -2,13 +2,13 @@ import { createHash } from "node:crypto";
 import { applyEpisodeDraft, type EpisodeDraft, type ProductionCatalog } from "./catalog";
 import { buildAdaptationInput, type AdaptationOptions } from "./adaptationInput";
 import type { ProductionStore, PricedTaskInput } from "./store";
-import { validateShotDirection } from "./shotDirection";
+import { validateShotDirection, validateShotSceneContext } from "./shotDirection";
 
 export function readAdaptationInput(catalog: ProductionCatalog, projectId: string, inputId: string) {
   const row = catalog.db.query(`SELECT request_json AS requestJson FROM adaptation_input WHERE id = ? AND project_id = ?`)
     .get(inputId, projectId) as { requestJson: string } | null;
   if (!row || createHash("sha256").update(row.requestJson).digest("hex") !== inputId) throw new Error("编剧输入不存在或已被改动");
-  const request = JSON.parse(row.requestJson) as { options: AdaptationOptions; responseSchema: unknown; templateVersion: "novelEpisode.v1" | "novelEpisode.v2" };
+  const request = JSON.parse(row.requestJson) as { options: AdaptationOptions; responseSchema: unknown; templateVersion: "novelEpisode.v1" | "novelEpisode.v2" | "novelEpisode.v3" };
   return { ...row, ...request };
 }
 
@@ -50,6 +50,9 @@ export function adoptAdaptationResponse(catalog: ProductionCatalog, store: Produ
   const schema = input.responseSchema as { properties?: { shots?: { items?: { required?: string[] } } } } | null;
   if (schema?.properties?.shots?.items?.required?.includes("direction")) {
     for (const shot of draft.shots) validateShotDirection(shot.direction, shot.characterNames);
+  }
+  if (schema?.properties?.shots?.items?.required?.includes("sceneContext")) {
+    for (const shot of draft.shots) validateShotSceneContext(shot.sceneContext, draft.script, shot.sceneName);
   }
   if (draft.episodeNumber !== input.options.episodeNumber) throw new Error("生成的集号与编剧任务不一致");
   const duration = draft.shots.reduce((sum, shot) => sum + shot.durationMs, 0);

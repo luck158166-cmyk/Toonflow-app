@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Database } from "bun:sqlite";
 import { checkEpisodeScript, checkSourceEvidence, indexNovel, type SourceEvidence } from "./novelAdaptation";
-import { validateShotDirection, type ShotDirection } from "./shotDirection";
+import { validateShotDirection, validateShotSceneContext, type ShotDirection, type ShotSceneContext } from "./shotDirection";
 
 export type SourceKind = "synopsis" | "novel" | "script";
 export type ReviewState = "draft" | "confirmed" | "changes_requested";
@@ -18,7 +18,7 @@ export type EpisodeDraft = {
   characters: Array<{ name: string; aliases: string[]; stableDescription: string; evidence: DraftEvidence[]; firstAppearance: string }>;
   props?: Array<{ name: string; aliases: string[]; stableDescription: string; evidence: DraftEvidence[]; firstAppearance: string }>;
   shots: Array<{ sequence: number; sceneName: string; title: string; scriptExcerpt: string; evidence: DraftEvidence[];
-    durationMs: number; shotSize: string; movement: string; promptText: string; characterNames: string[]; direction?: ShotDirection;
+    durationMs: number; shotSize: string; movement: string; promptText: string; characterNames: string[]; direction?: ShotDirection; sceneContext?: ShotSceneContext;
     propUses?: Array<{ name: string; holderBeforeName?: string; holderAfterName?: string;
       stateBefore: string; stateAfter: string; interaction: string; evidence: DraftEvidence[] }>;
     dialogue: Array<{ kind: DialogueKind; speakerName?: string; listenerName?: string; text: string; emotion?: string; voiceProfile?: string }> }>;
@@ -223,6 +223,16 @@ export class ProductionCatalog {
         shot_id TEXT PRIMARY KEY REFERENCES production_shot(id),
         direction_json TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS shot_scene_context (
+        shot_id TEXT PRIMARY KEY REFERENCES production_shot(id), context_json TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS episode_segment_plan (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES production_project(id),
+        episode_id TEXT NOT NULL REFERENCES production_episode(id),
+        input_hash TEXT NOT NULL, version INTEGER NOT NULL CHECK(version > 0),
+        snapshot_json TEXT NOT NULL, created_at INTEGER NOT NULL,
+        UNIQUE(episode_id, input_hash), UNIQUE(episode_id, version)
+      );
       CREATE TABLE IF NOT EXISTS compiled_shot_prompt (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL REFERENCES production_project(id),
@@ -248,6 +258,8 @@ export class ProductionCatalog {
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (8, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (9, ?) ON CONFLICT(version) DO NOTHING`)
+      .run(Date.now());
+    db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (10, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
   }
 
@@ -350,14 +362,15 @@ export class ProductionCatalog {
       s.movement, s.duration_ms AS durationMs, s.prompt_text AS promptText,
       s.prompt_version AS promptVersion, s.review_state AS reviewState,
       s.runtime_state AS runtimeState, s.video_readiness AS videoReadiness,
-      (SELECT direction_json FROM shot_direction WHERE shot_id = s.id) AS directionJson
+      (SELECT direction_json FROM shot_direction WHERE shot_id = s.id) AS directionJson,
+      (SELECT context_json FROM shot_scene_context WHERE shot_id = s.id) AS contextJson
       FROM production_shot s JOIN production_episode e ON e.id = s.episode_id
       WHERE s.project_id = ? ORDER BY e.episode_number, s.sequence`).all(projectId) as Array<{
         id: string; episodeId: string; episodeNumber: number; sequence: number; sceneId: string | null;
         title: string; scriptExcerpt: string; evidenceJson: string; shotSize: string;
         cameraAngle: string; movement: string; durationMs: number; promptText: string;
         promptVersion: number; reviewState: ReviewState; runtimeState: RuntimeState;
-        videoReadiness: VideoReadiness; directionJson: string | null }>;
+        videoReadiness: VideoReadiness; directionJson: string | null; contextJson: string | null }>;
     const shotProps = this.db.query(`SELECT l.shot_id AS shotId, l.prop_id AS propId, p.name AS propName,
       l.holder_before_id AS holderBeforeId, before_holder.name AS holderBeforeName,
       l.holder_after_id AS holderAfterId, after_holder.name AS holderAfterName,
@@ -391,8 +404,9 @@ export class ProductionCatalog {
         aliases: JSON.parse(aliasesJson) as string[], evidence: JSON.parse(evidenceJson) as unknown[], locked: !!locked })),
       scenes: scenes.map(({ evidenceJson, locked, ...scene }) => ({ ...scene,
         evidence: JSON.parse(evidenceJson) as unknown[], locked: !!locked })),
-      shots: shots.map(({ evidenceJson, directionJson, ...shot }) => ({ ...shot, evidence: JSON.parse(evidenceJson) as unknown[],
-        direction: directionJson ? JSON.parse(directionJson) as ShotDirection : null })),
+      shots: shots.map(({ evidenceJson, directionJson, contextJson, ...shot }) => ({ ...shot, evidence: JSON.parse(evidenceJson) as unknown[],
+        direction: directionJson ? JSON.parse(directionJson) as ShotDirection : null,
+        sceneContext: contextJson ? JSON.parse(contextJson) as ShotSceneContext : null })),
       shotProps: shotProps.map(({ evidenceJson, ...link }) => ({ ...link, evidence: JSON.parse(evidenceJson) as unknown[] })),
     };
   }
@@ -738,6 +752,7 @@ export function applyEpisodeDraft(catalog: ProductionCatalog, projectId: string,
       throw new Error("Each shot needs a unique sequence, scene, script evidence and duration.");
     }
     sequences.add(shot.sequence);
+    if (shot.sceneContext) validateShotSceneContext(shot.sceneContext, draft.script, shot.sceneName);
     for (const name of shot.characterNames) if (!characterNames.has(name.trim().toLocaleLowerCase())) {
       throw new Error(`Shot references an unknown character: ${name}`);
     }
@@ -818,6 +833,8 @@ export function applyEpisodeDraft(catalog: ProductionCatalog, projectId: string,
       shotIds.push(shotId);
       if (shot.direction) catalog.db.query("INSERT INTO shot_direction(shot_id, direction_json) VALUES (?, ?)")
         .run(shotId, JSON.stringify(shot.direction));
+      if (shot.sceneContext) catalog.db.query("INSERT INTO shot_scene_context(shot_id, context_json) VALUES (?, ?)")
+        .run(shotId, JSON.stringify(shot.sceneContext));
       if (shot.promptText.trim()) catalog.setShotPrompt(shotId, shot.promptText);
       for (const name of shot.characterNames) catalog.linkCharacterToShot(shotId,
         characterIds.get(characterNames.get(name.trim().toLocaleLowerCase())!)!);

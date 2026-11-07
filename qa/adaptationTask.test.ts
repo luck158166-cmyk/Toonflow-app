@@ -9,7 +9,8 @@ import { ProductionStore } from "../packages/production/src/store";
 import { prepareAdaptationInput } from "../packages/production/src/adaptationInput";
 import { buildAdaptationTask, adoptAdaptationResponse } from "../packages/production/src/adaptationTask";
 import { runTextTask } from "../packages/production/src/textWorker";
-import { episodeDraftSchema } from "../apps/server/src/lib/episodeDraftSchema";
+import { episodeDraftSchema, segmentedEpisodeSchema } from "../apps/server/src/lib/episodeDraftSchema";
+import { z } from "../apps/server/node_modules/zod";
 
 const sourceText = "第一章 雨夜\n" + "林岚走进车站，拾起铜钥匙。".repeat(9);
 function setup(projectDb: Database, globalDb: Database, requireDirection = false) {
@@ -106,6 +107,7 @@ it("keeps historical v1 inputs resumable after adding the v2 director contract",
     const s = setup(projectDb, globalDb);
     const oldRequest = JSON.parse(s.prepared.requestJson); oldRequest.templateVersion = "novelEpisode.v1";
     delete oldRequest.directionInstructions;
+    delete oldRequest.segmentInstructions;
     const json = JSON.stringify(oldRequest); const id = createHash("sha256").update(json).digest("hex");
     projectDb.query("INSERT INTO adaptation_input(id, project_id, episode_number, source_hash, template_version, request_json, created_at) VALUES (?, ?, 1, ?, ?, ?, ?)")
       .run(id, s.projectId, s.prepared.sourceHash, "novelEpisode.v1", json, Date.now());
@@ -113,5 +115,25 @@ it("keeps historical v1 inputs resumable after adding the v2 director contract",
     await runTextTask(s.store, task.id, { providerId: "mock", async generate() { return { responseText: JSON.stringify(s.draft), providerRequestId: "qa", usageJson: "{}" }; } });
     expect(adoptAdaptationResponse(s.catalog, s.store, s.projectId, id, task.id, value => episodeDraftSchema.parse(value)).alreadyAdopted).toBe(false);
     expect(s.catalog.getProjectProduction(s.projectId).shots[0]!.direction).toBeNull();
+  } finally { projectDb.close(); globalDb.close(); }
+});
+
+it("preserves v2 task input hashes and enforces scene context for new v3 model responses", async () => {
+  const projectDb = new Database(":memory:"); const globalDb = new Database(":memory:");
+  try {
+    const s = setup(projectDb, globalDb);
+    const oldRequest = JSON.parse(s.prepared.requestJson); oldRequest.templateVersion = "novelEpisode.v2"; delete oldRequest.segmentInstructions;
+    const json = JSON.stringify(oldRequest); const id = createHash("sha256").update(json).digest("hex");
+    projectDb.query("INSERT INTO adaptation_input(id, project_id, episode_number, source_hash, template_version, request_json, created_at) VALUES (?, ?, 1, ?, ?, ?, ?)")
+      .run(id, s.projectId, s.prepared.sourceHash, "novelEpisode.v2", json, Date.now());
+    expect(buildAdaptationTask(s.catalog, s.projectId, id, "mock", "mock").requestJson).toBe(json);
+    const latest = prepareAdaptationInput(s.catalog, s.projectId, oldRequest.options, z.toJSONSchema(segmentedEpisodeSchema));
+    const task = s.store.createTask({ ...buildAdaptationTask(s.catalog, s.projectId, latest.id, "mock", "mock"), billable: false, estimatedCostMicros: 0, currency: "CNY" }).task;
+    const direction = { summary: "走入车站", action: "林岚推门进来", camera: "固定", positions: [{ name: "林岚", start: "站在门外", end: "站在门内" }], environment: "夜间车站", style: "动画", sound: "脚步声" };
+    const response = { ...s.draft, shots: s.draft.shots.map(shot => ({ ...shot, direction })) };
+    await runTextTask(s.store, task.id, { providerId: "mock", async generate() { return { responseText: JSON.stringify(response), providerRequestId: "qa", usageJson: "{}" }; } });
+    expect(() => adoptAdaptationResponse(s.catalog, s.store, s.projectId, latest.id, task.id, value => episodeDraftSchema.parse(value))).toThrow("场次归属");
+    expect(s.catalog.getProjectProduction(s.projectId).episodes).toHaveLength(0);
+    expect(s.store.getTask(task.id).state).toBe("succeeded");
   } finally { projectDb.close(); globalDb.close(); }
 });

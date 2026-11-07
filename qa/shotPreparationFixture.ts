@@ -3,7 +3,7 @@ import { getEpisodeReview, reviewEpisode } from "../packages/production/src/epis
 import { listReferenceTargets, bindAssetReference, type BindReferenceInput } from "../packages/production/src/assetReference";
 import { indexNovel } from "../packages/production/src/novelAdaptation";
 
-export function createShotFixture(catalog: ProductionCatalog) {
+export function createShotFixture(catalog: ProductionCatalog, changeDraft?: (draft: EpisodeDraft) => void) {
   const sourceText = "第一章 交接\n" + "林岚把钥匙交给陈墨，陈墨收好钥匙。".repeat(12);
   const projectId = catalog.importStory({ title: "镜头资料验证", sourceKind: "novel", sourceText });
   const evidence = [{ sourceHash: indexNovel(sourceText).sourceHash, chapterSequence: 1, lineStart: 2, lineEnd: 2, quote: "林岚把钥匙交给陈墨" }];
@@ -15,6 +15,7 @@ export function createShotFixture(catalog: ProductionCatalog) {
     shots: [1, 2].map(sequence => ({ sequence, sceneName: "车站", title: sequence === 1 ? "交出钥匙" : "收好钥匙",
       scriptExcerpt: sequence === 1 ? "林岚递出钥匙，陈墨接过。" : "陈墨收好钥匙，林岚转身。", evidence,
       durationMs: 5000, shotSize: "近景", movement: "固定", promptText: "编剧草稿，尚未编译", characterNames: ["陈墨", "林岚"],
+      sceneContext: { sceneSequence: 1, isolate: false, reason: "" },
       direction: { summary: sequence === 1 ? "车站中林岚将钥匙交给陈墨" : "车站中陈墨收好钥匙",
         action: sequence === 1 ? "林岚伸手递出钥匙，陈墨抬手接过，神情认真" : "陈墨将钥匙装进口袋，林岚转身",
         camera: "固定", positions: [{ name: "林岚", start: "位于画面左侧，面向右侧陈墨，视线落在钥匙上",
@@ -25,6 +26,7 @@ export function createShotFixture(catalog: ProductionCatalog) {
       dialogue: [{ kind: "dialogue", speakerName: sequence === 1 ? "林岚" : "陈墨", text: sequence === 1 ? "给你。" : "我收好了。", emotion: "认真" }],
       propUses: [{ name: "铜钥匙", holderBeforeName: sequence === 1 ? "林岚" : "陈墨", holderAfterName: "陈墨",
         stateBefore: "完整", stateAfter: "完整", interaction: sequence === 1 ? "交接" : "收好", evidence }] })) };
+  changeDraft?.(draft);
   const result = applyEpisodeDraft(catalog, projectId, draft);
   const review = getEpisodeReview(catalog, projectId, result.episodeId);
   reviewEpisode(catalog, { projectId, episodeId: result.episodeId, snapshotHash: review.snapshotHash, decision: "confirmed", note: "QA fixture" });
