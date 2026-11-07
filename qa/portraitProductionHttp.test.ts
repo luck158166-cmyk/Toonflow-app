@@ -1,0 +1,23 @@
+import { expect, it } from "bun:test";
+import { mkdtempSync, readFileSync } from "@toonflow/file";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+it("connects six generated/adopted originals to a two-character segment and checks account/expiry at the real POST boundary", async () => {
+  const root = mkdtempSync(join(tmpdir(), "portraitProduction"));
+  const child = Bun.spawn([process.execPath, resolve("qa/portraitProductionScenario.ts"), root], { stdout: "pipe", stderr: "pipe" });
+  const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+  if (code) throw new Error(stdout + stderr);
+  const result = JSON.parse(readFileSync(join(root, "result.json"), "utf8"));
+  expect(result.beforeReview.canSubmit).toBe(false); expect(result.beforeReview.portraits.every((item: any) => item.eligible)).toBe(true);
+  expect(result.ready.canSubmit).toBe(true); expect(result.ready.portraits).toHaveLength(4);
+  expect(result.mismatch.portraits.every((item: any) => item.status === "credentialMismatch")).toBe(true); expect(result.denied.status).toBe(409);
+  expect(result.expiring.portraits.every((item: any) => item.status === "expiring")).toBe(true); expect(result.expiring.planHash).toBe(result.ready.planHash);
+  expect(result.expired.canSubmit).toBe(false); expect(result.expiredRun.status).toBe(409);
+  expect(result.callsBeforeVideo.filter((call: string) => call.includes("contents/generations"))).toHaveLength(0);
+  expect(result.deadlineError).toContain("超过 30 天"); expect(result.completed.state).toBe("succeeded");
+  expect(result.references).toHaveLength(6); expect(result.repeat.body.data.taskId).toBe(result.run.taskId); expect(result.repeat.body.data.state).toBe("succeeded");
+  expect(result.calls.filter((call: string) => call.startsWith("POST") && call.includes("images/generations"))).toHaveLength(6);
+  expect(result.calls.filter((call: string) => call.startsWith("POST") && call.includes("contents/generations"))).toHaveLength(1);
+  expect(result.videoHash).toMatch(/^[a-f0-9]{64}$/); expect(JSON.stringify(result)).not.toContain("qaPortraitKey");
+  console.log("人物投产 HTTP 验证目录：" + root);
+}, 120000);

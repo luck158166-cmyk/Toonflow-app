@@ -5,6 +5,8 @@ import { ProductionStore } from "../packages/production/src/store";
 import { getEpisodeSegmentPlan, saveEpisodeSegmentPlan } from "../packages/production/src/segmentPlan";
 import { previewSegmentExecution, reviewSegmentPreflight, segmentTaskKey, segmentVideoPriceUnit } from "../packages/production/src/segmentExecution";
 import { createShotFixture, bindFixtureImages, scenicDraft } from "./shotPreparationFixture";
+import { bindAssetReference, listAssetReferences } from "../packages/production/src/assetReference";
+import { inspectPortraitEligibility } from "../packages/production/src/portraitEligibility";
 
 const review = { actionConfirmed: true, continuityConfirmed: true, dialogueConfirmed: true, referencesConfirmed: true, note: "QA 本片段为空镜，无人物与对白；前后灯光一致" } as const;
 const model = { revision: "a".repeat(64), available: true, configured: true };
@@ -60,5 +62,37 @@ it("invalidates review and authorization on changed content and preserves histor
     const report = previewSegmentExecution(s.catalog, s.store, next, model);
     expect(report.review).toBeNull(); expect(report.canSubmit).toBe(false);
     expect(s.db.query("SELECT id FROM segment_preflight_review").all()).toEqual([{ id: old.id }]);
+  } finally { s.db.close(); }
+});
+
+it("admits recorded original portraits only within the same credential scope and 30-day period; warnings do not mutate the plan", () => {
+  const s = setup(); const now = Date.now(); const scope = "d".repeat(64);
+  try {
+    for (const reference of listAssetReferences(s.catalog, s.projectId).filter(item => ["headshot", "fullBody"].includes(item.role))) {
+      bindAssetReference(s.catalog, { ...reference, expectedReferenceId: reference.id, rightsConfirmed: true, sourceNote: "QA model original",
+        file: reference }, { taskId: "qa" + reference.id, modelId: "doubao-seedream-5-0-pro-260628", generatedAt: now - 24 * 86400000,
+        credentialScope: scope, method: "textToImage", originalSha256: reference.sha256 });
+    }
+    const input = { ...s.input, inputHash: getEpisodeSegmentPlan(s.catalog, s.projectId, s.episodeId).inputHash };
+    saveEpisodeSegmentPlan(s.catalog, s.projectId, s.episodeId, input.inputHash); s.price();
+    const configured = { ...model, credentialScope: scope };
+    const beforeReview = previewSegmentExecution(s.catalog, s.store, input, configured);
+    expect(beforeReview.checks.find(item => item.code === "P14")?.state).toBe("passed");
+    expect(beforeReview.canSubmit).toBe(false);
+    reviewSegmentPreflight(s.catalog, input, review);
+    const ready = previewSegmentExecution(s.catalog, s.store, input, configured);
+    expect(ready.canSubmit).toBe(true); expect(ready.portraits).toHaveLength(4);
+    expect(ready.portraits.every(item => item.status === "expiring")).toBe(true);
+    const changed = previewSegmentExecution(s.catalog, s.store, input, { ...configured, credentialScope: "e".repeat(64) });
+    expect(changed.canSubmit).toBe(false); expect(changed.portraits.every(item => item.status === "credentialMismatch")).toBe(true);
+    const references = getEpisodeSegmentPlan(s.catalog, s.projectId, s.episodeId).snapshot.segments[0]!.references;
+    const expiry = ready.portraits[0]!.expiresAt!;
+    expect(inspectPortraitEligibility(references, scope, expiry - 1).every(item => item.eligible)).toBe(true);
+    expect(inspectPortraitEligibility(references, scope, expiry).every(item => item.status === "expired")).toBe(true);
+    expect(inspectPortraitEligibility(references, scope, now - 25 * 86400000).every(item => item.status === "futureSource")).toBe(true);
+    const broken = structuredClone(references); broken.find(item => item.role === "headshot")!.reference!.origin!.originalSha256 = "f".repeat(64);
+    expect(inspectPortraitEligibility(broken, scope)[0]!.eligible).toBe(false);
+    expect(getEpisodeSegmentPlan(s.catalog, s.projectId, s.episodeId).inputHash).toBe(input.inputHash);
+    expect(s.store.listProjectTasks(s.projectId)).toHaveLength(0);
   } finally { s.db.close(); }
 });

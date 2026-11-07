@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { ProductionCatalog } from "./catalog";
 import { getEpisodeSegmentPlan } from "./segmentPlan";
 import { serializeHostMediaRequest, type ProductionStore } from "./store";
+import { inspectPortraitEligibility, portraitPolicyVersion } from "./portraitEligibility";
 
 export type SegmentExecutionInput = { projectId: string; episodeId: string; sequence: number; inputHash: string };
 export type SegmentPreflightReview = { id: string; note: string; reviewedBy: string; createdAt: number };
@@ -52,8 +53,15 @@ export function segmentTaskKey(input: SegmentExecutionInput) {
 /** Review resolves human preflight only. It cannot substitute for platform face provenance or post-generation QC. */
 export function previewSegmentExecution(catalog: ProductionCatalog, store: ProductionStore, input: SegmentExecutionInput, model: SegmentModelStatus) {
   const { segment, saved } = selection(catalog, input); const review = readReview(catalog, input);
-  const checks = segment.checks.map(item => review && item.state === "pending" && ["P17", "contentQuality"].includes(item.code)
-    ? { ...item, state: "passed" as const, message: `本机人工投产复核已记录；不代表生成后质量通过（${item.code}）` } : item);
+  const portraits = inspectPortraitEligibility(segment.references, model.credentialScope);
+  const checks = segment.checks.map(item => {
+    if (item.code === "P14" && item.state === "pending" && portraits.length) return { ...item,
+      state: portraits.every(item => item.eligible) ? "passed" as const : "pending" as const,
+      message: portraits.every(item => item.eligible) ? "人物原图来源、同凭据与期限满足本地条件；原字节由宿主复核，平台审核及生成质量尚未确认"
+        : portraits.filter(item => !item.eligible).map(item => `${item.name}${item.role === "headshot" ? "面部图" : "全身图"}：${item.message}`).join("；") };
+    return review && item.state === "pending" && ["P17", "contentQuality"].includes(item.code)
+      ? { ...item, state: "passed" as const, message: `本机人工投产复核已记录；不代表生成后质量通过（${item.code}）` } : item;
+  });
   const blockers = checks.filter(item => item.state !== "passed").map(item => ({ code: item.code, message: item.message }));
   if (!saved) blockers.push({ code: "plan", message: "请先保存当前片段方案" });
   if (!model.available) blockers.push({ code: "model", message: "请安装支持当前规格的内置方舟视频供应商" });
@@ -72,9 +80,10 @@ export function previewSegmentExecution(catalog: ProductionCatalog, store: Produ
     if (quote.currency !== "CNY" || quote.amountMicros < 1) throw new Error("请确认有效的人民币视频保守秒价");
     price = { ruleId: quote.rule.id, estimatedCostMicros: quote.amountMicros, sourceUrl: quote.rule.sourceUrl, unit: segmentVideoPriceUnit, quantity: request.duration };
   } catch (cause) { blockers.push({ code: "price", message: `缺少适用的视频价格：${cause instanceof Error ? cause.message : "报价失败"}` }); }
-  const basis = { ...input, reviewId: review?.id ?? null, modelRevision: model.revision, credentialScope: model.credentialScope, requestJson, price, destination: segmentVideoDestination };
+  const basis = { ...input, reviewId: review?.id ?? null, modelRevision: model.revision, credentialScope: model.credentialScope,
+    portraitPolicyVersion, requestJson, price, destination: segmentVideoDestination };
   const existing = store.findTaskByIdempotencyKey(segmentTaskKey(input));
-  return { ...basis, planHash: hash(basis), review, checks, blockers, canSubmit: blockers.length === 0,
+  return { ...basis, planHash: hash(basis), review, checks, portraits, blockers, canSubmit: blockers.length === 0,
     savedVersion: saved?.version ?? null, references: segment.references, timeline: segment.timeline,
     existingTask: existing ? { id: existing.id, state: existing.state, requestStarted: existing.requestStarted } : null };
 }

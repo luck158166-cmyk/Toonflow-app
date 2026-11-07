@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { lstat, realpath } from "@toonflow/file";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
-import { serializeHostMediaRequest, type HostMediaBinding } from "@toonflow/production";
+import { previewSegmentExecution, serializeHostMediaRequest, type HostMediaBinding } from "@toonflow/production";
 
 const submissionContext = new AsyncLocalStorage<{ directory: string; taskId: string }>();
 
@@ -23,6 +23,35 @@ export function assertProductionReferenceBytes(directory: string, path: string, 
 export function productionCredentialScope(key: unknown) {
   const normalized = typeof key === "string" ? key.trim().replace(/^Bearer\s+/i, "").trim() : "";
   return normalized ? createHash("sha256").update(`ark:${normalized}`).digest("hex") : undefined;
+}
+
+/** Recheck the live plan/expiry after media preparation, at the actual paid POST boundary. Recovery never receives this wrapper. */
+export function productionSubmissionFetch(directory: string | undefined, revision: string, apiKey: unknown): typeof fetch | undefined {
+  const context = submissionContext.getStore();
+  if (!context || context.directory !== directory) return undefined;
+  const nativeFetch = fetch; const credentialScope = productionCredentialScope(apiKey); let submitted = false;
+  return Object.assign(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+    if (method === "POST") {
+      if (submitted) throw new Error("本次生产授权只允许一次生成提交");
+      submitted = true;
+      const { withProduction } = await import("./index");
+      await withProduction(context.directory, (catalog, store) => {
+        const task = store.getTask(context.taskId); const binding = store.getHostMediaBinding(context.taskId);
+        if (!binding) throw new Error("缺少生产授权");
+        store.assertHostMediaSubmission(context.taskId, context.directory, binding.mediaType, task.requestJson);
+        const authorization = binding.authorization;
+        if (authorization.providerRevision && authorization.providerRevision !== revision
+          || authorization.credentialScope && authorization.credentialScope !== credentialScope) throw new Error("实际供应商配置与授权不符，未提交模型");
+        if (authorization.segmentInput) {
+          const current = previewSegmentExecution(catalog, store, authorization.segmentInput, { revision, credentialScope, available: true, configured: !!credentialScope });
+          if (!current.canSubmit) throw new Error(current.blockers.map(item => item.message).join("；"));
+          if (current.planHash !== authorization.approvedPlanHash) throw new Error("片段依据或费用已变化，未提交模型，请重新检查");
+        }
+      });
+    }
+    return nativeFetch(input, init);
+  }, { preconnect: nativeFetch.preconnect }) as typeof fetch;
 }
 
 export async function assertProductionProviderRevision(directory: string | undefined, revision: string, apiKey?: unknown) {

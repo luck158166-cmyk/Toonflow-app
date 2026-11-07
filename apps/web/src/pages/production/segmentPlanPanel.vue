@@ -12,7 +12,7 @@
         <p class="notice">{{ segment.boundaryReason }}</p>
         <p v-for="(check, index) in segment.checks.filter(item => item.state === 'failed')" :key="index" class="issues">{{ check.message }}</p>
         <details><summary>查看统一素材与提示词</summary><div class="referenceList"><span v-for="slot in segment.references" :key="slot.index">图片 {{ slot.index }} · {{ slot.name }} · {{ roleLabel(slot.role) }} · {{ slot.reference ? `v${slot.reference.version}` : '缺图' }}</span></div><pre>{{ segment.requestDraft.prompt }}</pre></details>
-        <details><summary>检查与待验证事项</summary><p v-for="(check, index) in segment.checks" :key="index">{{ check.state === 'passed' ? '已检查' : check.state === 'pending' ? '待验证' : '需处理' }} · {{ check.message }}</p></details>
+        <details><summary>检查与待验证事项</summary><p v-for="(check, index) in segment.checks" :key="index">{{ check.state === 'passed' ? '已检查' : check.state === 'pending' ? '待验证' : '需处理' }} · {{ check.code === 'P14' && check.state === 'pending' ? '人物原图来源、当前凭据与有效期将在下方投产检查中核验；保存方案不会冻结使用期限。' : check.message }}</p></details>
         <segmentExecutionPanel :directory="directory" :projectId="projectId" :episodeId="selectedId" :inputHash="report.inputHash" :sequence="segment.sequence" :saved="!!saved" @openCosts="emit('openCosts')" @changed="emit('changed')" />
       </article>
       <div class="actions"><el-button type="primary" :loading="saving" :disabled="loading || !report.canSave || !!saved" @click="save">{{ saved ? `当前方案已保存为 v${saved.version}` : '保存本集片段方案' }}</el-button><span>只保存制作候选，不启动付费生成。</span></div>

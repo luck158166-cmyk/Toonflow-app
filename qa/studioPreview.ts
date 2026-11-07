@@ -22,8 +22,9 @@ if (new URLSearchParams(location.search).get("stage") === "videoTasks") {
   const { default: mediaModel } = await import("../apps/web/src/components/settings/panels/mediaModel/index.vue");
   const { createPinia } = await import("../apps/web/node_modules/pinia/dist/pinia.js");
   createApp({ render: () => h(mediaModel) }).use(createPinia()).mount("#app");
-} else if (new URLSearchParams(location.search).get("stage") === "segments") {
-  document.querySelector("#notice")!.textContent = "片段规划验证 · 临时工作区真实读写 · 无模型调用";
+} else if (["segments", "portraits"].includes(new URLSearchParams(location.search).get("stage") ?? "")) {
+  document.querySelector("#notice")!.textContent = new URLSearchParams(location.search).get("stage") === "portraits"
+    ? "人物原图验证 · QA 时钟为生成后 24 天 · 模型请求已拦截，图片为测试像素" : "片段规划验证 · 临时工作区真实读写 · 无模型调用";
   const fixture = await (await fetch("/qa/referenceFixture")).json();
   const { default: segmentPlanPanel } = await import("../apps/web/src/pages/production/segmentPlanPanel.vue");
   const { createPinia } = await import("../apps/web/node_modules/pinia/dist/pinia.js");

@@ -15,6 +15,7 @@
         <el-checkbox v-model="rightsConfirmed" :disabled="saving">我已确认图片使用权及当前预览；{{ currentReference ? '同意新增版本，旧图继续保留' : '同意作为该资产的参考图' }}</el-checkbox>
         <el-button type="primary" :loading="saving" :disabled="!canBind" @click="bindReference">{{ currentReference ? '确认替换并保留旧版' : '确认绑定原图' }}</el-button>
       </div>
+      <p v-if="currentPortrait" :class="currentPortrait.eligible && currentPortrait.status !== 'expiring' ? 'notice' : 'errorText'">当前人物原图：{{ currentPortrait.message }}<template v-if="currentPortrait.expiresAt"><br />使用期限：{{ new Date(currentPortrait.expiresAt).toLocaleString() }}</template><br />以上依据本地来源记录，投产时仍核验实际文件；平台审核与形象质量尚未确认。</p>
       <p class="notice">这里保存本地原图与用途，不压缩、不重绘，也不会自动声明平台人脸信任或视频就绪。模型是否接受该素材仍需生成前检查。</p>
       <details v-if="history.length"><summary>查看{{ roleLabel(role) }}历史（{{ history.length }} 版）</summary><article v-for="reference in history" :key="reference.id" class="historyRow"><div class="historyImage"><referenceThumb :directory="directory" :projectId="projectId" :referenceId="reference.id" :label="`${selectedTarget.name} 第 ${reference.version} 版`" /></div><div><b>v{{ reference.version }} {{ reference.id === currentReference?.id ? '· 当前版本' : '' }}</b><p>{{ reference.sourceNote }}</p><small>{{ reference.width }} × {{ reference.height }} · {{ new Date(reference.createdAt).toLocaleString() }}<br />SHA-256：{{ reference.sha256.slice(0, 16) }}…</small></div></article></details>
     </template>
@@ -27,13 +28,14 @@ import axios from "axios";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
-import productionApi, { type AssetReference, type ReferenceRole, type ReferenceTarget } from "@/lib/productionApi";
+import productionApi, { type AssetReference, type ReferenceRole, type ReferenceTarget, type PortraitEligibility } from "@/lib/productionApi";
 import referenceThumb from "./referenceThumb.vue";
 import assetImagePanel from "./assetImagePanel.vue";
 const props = defineProps<{ directory: string; projectId: string }>();
 const emit = defineEmits<{ changed: []; openCosts: [] }>();
 const targets = ref<ReferenceTarget[]>([]);
 const references = ref<AssetReference[]>([]);
+const portraits = ref<PortraitEligibility[]>([]);
 const selectedId = ref("");
 const role = ref<ReferenceRole>("headshot");
 const loading = ref(false);
@@ -49,6 +51,7 @@ let requestVersion = 0;
 const selectedTarget = computed(() => targets.value.find(item => item.entityId === selectedId.value));
 const history = computed(() => references.value.filter(item => item.entityId === selectedId.value && item.role === role.value));
 const currentReference = computed(() => history.value[0] ?? null);
+const currentPortrait = computed(() => portraits.value.find(item => item.referenceId === currentReference.value?.id));
 const canBind = computed(() => !saving.value && !loading.value && selectedTarget.value?.locked
   && !!selectedFile.value && imageReady.value && rightsConfirmed.value && !!sourceNote.value.trim());
 function kindLabel(kind: string) { return ({ character: "角色", scene: "场景", prop: "道具", costume: "服装" } as Record<string, string>)[kind] ?? kind; }
@@ -67,7 +70,7 @@ async function loadReferences() {
   try {
     const result = await productionApi.getAssetReferences(props.directory, props.projectId);
     if (version !== requestVersion) return;
-    targets.value = result.targets; references.value = result.references;
+    targets.value = result.targets; references.value = result.references; portraits.value = result.portraits;
     if (!result.targets.some(item => item.entityId === selectedId.value)) selectedId.value = result.targets[0]?.entityId ?? "";
   } catch (cause) { if (version === requestVersion) errorText.value = message(cause); }
   finally { if (version === requestVersion) loading.value = false; }

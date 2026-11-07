@@ -11,7 +11,7 @@ import { lockWorkspaceFiles, resolveWorkspacePath, writeWorkspaceFile } from "@/
 import { beginGeneration, getProviderPrice } from "@/utils/media/billing";
 import { detectMimeType, readPriceReference } from "@/utils/media/priceReference";
 import { modelGateway } from "@/utils/multiTenant/gateway";
-import { assertProductionGenerationGate, assertProductionReferenceBytes, assertProductionProviderRevision } from "@/utils/production/generationGate";
+import { assertProductionGenerationGate, assertProductionReferenceBytes, assertProductionProviderRevision, productionSubmissionFetch } from "@/utils/production/generationGate";
 
 const maxMediaSize = 100 * 1024 * 1024;
 export type MediaGenerationCheckpoint = {
@@ -215,7 +215,8 @@ async function configuredProvider(request: MediaGenerationRequest, mediaType: "i
   const configuration = record(configurations[info.id]);
   if (!resume) await assertProductionProviderRevision(directory, info.revision, configuration.apiKey);
   if (!resume && !info.models.some(model => model.id === request.modelId && model.type === mediaType)) invalid("所选媒体模型不存在或类型不匹配，请重新选择");
-  const provider = await loadMediaProviderSource(info.source, configuration, signal, undefined, directory, saveTaskData);
+  const provider = await loadMediaProviderSource(info.source, configuration, signal,
+    resume ? undefined : productionSubmissionFetch(directory, info.revision, configuration.apiKey), directory, saveTaskData);
   return { provider, request };
 }
 

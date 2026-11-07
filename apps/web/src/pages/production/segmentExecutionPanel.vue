@@ -9,6 +9,7 @@
       <template v-else>
         <h4>投产前复核</h4><p class="hint">核对本片段上方的时间线和提示词，以及以下原图。此记录用于半自动制作；生成后仍须检查实际画面与音频。</p>
         <div class="referenceGrid"><figure v-for="slot in preview.references" :key="slot.index"><div class="picture"><referenceThumb v-if="slot.reference" :directory="directory" :projectId="projectId" :referenceId="slot.reference.id" :label="slot.name" /></div><figcaption>图片 {{ slot.index }} · {{ slot.name }}</figcaption></figure></div>
+        <div v-if="preview.portraits.length" class="portraitChecks"><h4>人物原图使用条件</h4><p class="hint">同凭据检查是同账号使用的保守判定。这里不代表平台已审核通过，也不代表人物形象一致性已经达标。</p><p v-for="item in preview.portraits" :key="`${item.referenceId}:${item.role}`" :class="{ attention: !item.eligible || item.status === 'expiring' }"><b>{{ item.name }} · {{ item.role === 'headshot' ? '面部图' : '全身图' }}</b><br />{{ item.message }}<span v-if="item.expiresAt"><br />使用期限：{{ new Date(item.expiresAt).toLocaleString() }}</span></p></div>
         <p v-if="preview.review" class="reviewed">已保存复核：{{ preview.review.note }}</p>
         <el-form v-else labelPosition="top" :disabled="busy" @submit.prevent="review">
           <div class="reviewItems"><el-checkbox v-model="actionConfirmed">动作、站位与时长可执行</el-checkbox><el-checkbox v-model="continuityConfirmed">前后镜人物、场景、服装和道具状态连贯</el-checkbox><el-checkbox v-model="dialogueConfirmed">台词原文和发音已核对；无台词则确认不需要</el-checkbox><el-checkbox v-model="referencesConfirmed">原图对应正确，场景和道具图没有未声明人物</el-checkbox></div>
@@ -89,6 +90,7 @@ function recover() {
   :deep(.el-checkbox) { white-space: normal; height: auto; min-height: 34px; align-items: flex-start; .el-checkbox__input { margin-top: 4px; } .el-checkbox__label { white-space: normal; line-height: 1.7; } }
   .referenceGrid { display: flex; flex-wrap: wrap; gap: 12px; figure { margin: 0 0 14px; width: 150px; } .picture { height: 160px; border-radius: 8px; } figcaption { margin-top: 7px; font-size: 12px; color: #476078; } }
   .reviewed { color: #287963; }
+  .portraitChecks { margin: 14px 0; padding: 14px; background: white; border-radius: 8px; font-size: 13px; line-height: 1.8; color: #287963; .attention { color: #875a24; } }
   .blockers { margin: 14px 0; padding: 12px; border-radius: 8px; background: #fff5e5; color: #875a24; font-size: 13px; line-height: 1.8; p { margin: 6px 0; } }
   .authorization { margin-top: 20px; border-top: 1px solid #d6e8fa; padding-top: 20px; strong, a { color: #1686db; } .el-form { margin-top: 14px; } }
   details { font-size: 13px; summary { color: #1686db; cursor: pointer; } }

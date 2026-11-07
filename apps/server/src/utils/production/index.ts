@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { lstat, mkdir, realpath } from "@toonflow/file";
 import { ProductionCatalog, ProductionStore, indexNovel } from "@toonflow/production";
 export { createProjectBackup } from "./projectBackup";
+export { productionCredentialScope } from "./generationGate";
 export async function inspectAssetImage(...args: Parameters<typeof import("./assetImages").inspectAssetImage>) {
   return (await import("./assetImages")).inspectAssetImage(...args);
 }

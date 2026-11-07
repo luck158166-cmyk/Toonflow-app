@@ -79,7 +79,7 @@ export async function executeSegmentVideo(workspace: string, input: SegmentExecu
     { workspace: directory, segmentKey: `片段 ${input.sequence} · ${input.inputHash.slice(0, 12)}`, mediaType: "video",
       authorization: { approvedRequestHash: createHash("sha256").update(preview.requestJson).digest("hex"),
         approvedPlanHash: preview.planHash, priceRuleId: preview.price!.ruleId, maxCalls: 1,
-        maxCostMicros: approval.maxCostMicros, currency: "CNY", providerRevision: model.revision, credentialScope: model.credentialScope } });
+        maxCostMicros: approval.maxCostMicros, currency: "CNY", providerRevision: model.revision, credentialScope: model.credentialScope, segmentInput: input } });
   });
   if (dispatch.status === "budget_exhausted") return { taskId: dispatch.task.id, state: "queued", message: "预算不足，任务尚未提交；调整预算后可继续同一任务" };
   if (dispatch.status !== "started") return { taskId: dispatch.task.id, ...await recoverProductionVideoTask(directory, input.projectId, dispatch.task.id) };

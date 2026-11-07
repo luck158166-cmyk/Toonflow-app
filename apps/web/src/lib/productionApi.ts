@@ -6,6 +6,7 @@ export type AdaptationPreview = { planHash: string; estimatedCostMicros: number;
     targetSeconds: number; genre: string; visualStyle: string } };
 export type ProductionTextModel = { providerId: string; providerLabel: string; modelId: string; label: string; maxOutputTokens: number };
 export type ReferenceRole = "headshot" | "fullBody" | "scene" | "prop" | "costume";
+export type PortraitEligibility = { referenceId: string | null; name: string; role: "headshot" | "fullBody"; eligible: boolean; status: string; expiresAt: number | null; message: string };
 export type AssetImageRequest = { directory: string; projectId: string; entityKind: "asset" | "scene"; entityId: string; role: ReferenceRole; visualStyle: string };
 export type AssetImagePreview = { planHash: string; canSubmit: boolean; requestJson: string; destination: string; episodeNumber: number;
   blockers: string[]; price: { amountMicros: number; sourceUrl: string } | null; adoptedReferenceId: string | null;
@@ -35,6 +36,7 @@ export type CompiledShotPrompt = { inputHash: string; canSave: boolean; readyFor
 export type SourceKind = "synopsis" | "novel" | "script";
 export type SegmentExecutionRequest = { directory: string; projectId: string; episodeId: string; inputHash: string; sequence: number };
 export type SegmentExecutionPreview = { planHash: string; canSubmit: boolean; requestJson: string; destination: string;
+  portraits: PortraitEligibility[];
   review: { id: string; note: string; createdAt: number } | null; blockers: Array<{ code: string; message: string }>;
   price: { estimatedCostMicros: number; sourceUrl: string; quantity: number } | null;
   references: SegmentPlan["snapshot"]["segments"][number]["references"];
@@ -161,7 +163,7 @@ const productionApi = {
     return data.data;
   },
   async getAssetReferences(directory: string, projectId: string) {
-    const { data } = await client.get<{ data: { targets: ReferenceTarget[]; references: AssetReference[] } }>("/getAssetReferences", { params: { directory, projectId } });
+    const { data } = await client.get<{ data: { targets: ReferenceTarget[]; references: AssetReference[]; portraits: PortraitEligibility[] } }>("/getAssetReferences", { params: { directory, projectId } });
     return data.data;
   },
   async bindAssetReference(directory: string, input: { projectId: string; entityKind: "asset" | "scene"; entityId: string;
