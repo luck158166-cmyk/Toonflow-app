@@ -1,4 +1,4 @@
-import { ProductionStore, type DispatchResult, type Task, type TaskInput } from "./store";
+import { ProductionStore, type DispatchResult, type PricedTaskInput, type Task, type TaskInput } from "./store";
 
 /** Provider-specific HTTP code implements this port. The store and dispatcher stay provider-neutral. */
 export interface ProviderSubmissionPort {
@@ -34,6 +34,16 @@ export async function dispatchNewTask(
 ): Promise<DispatchOutcome> {
   if (input.provider !== provider.providerId) throw new Error("Task provider does not match the selected adapter.");
   return submitStarted(store, store.createTaskAndBeginSubmission(input), provider);
+}
+
+/** Live paid adapters use a confirmed price rule before any provider submission. */
+export async function dispatchPricedNewTask(
+  store: ProductionStore,
+  input: PricedTaskInput,
+  provider: ProviderSubmissionPort,
+): Promise<DispatchOutcome> {
+  if (input.provider !== provider.providerId) throw new Error("Task provider does not match the selected adapter.");
+  return submitStarted(store, store.createPricedTaskAndBeginSubmission(input), provider);
 }
 
 async function submitStarted(store: ProductionStore, started: DispatchResult,

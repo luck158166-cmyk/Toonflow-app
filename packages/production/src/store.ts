@@ -67,6 +67,13 @@ export type SynthesisExport = {
 };
 
 export type CreateTaskResult = { task: Task; created: boolean };
+export type PricedTaskInput = Omit<TaskInput, "estimatedCostMicros" | "currency" | "billable"> & {
+  unit: string; quantity: number;
+};
+export type TaskPriceSnapshot = {
+  taskId: string; priceRuleId: string; unit: string; unitSize: number; unitPriceMicros: number;
+  quantity: number; currency: string; estimatedCostMicros: number; sourceUrl: string; quotedAt: number;
+};
 export type DispatchResult =
   | { status: "started" | "warning_90"; task: Task; reservedMicros: number; usedAfterReserveMicros: number }
   | { status: "already_succeeded" | "already_dispatched" | "not_queued" | "budget_exhausted"; task: Task; usedMicros?: number; limitMicros?: number };
@@ -189,6 +196,18 @@ export class ProductionStore {
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS task_price_snapshot (
+        task_id TEXT PRIMARY KEY REFERENCES generation_task(id),
+        price_rule_id TEXT NOT NULL REFERENCES price_rule(id),
+        unit TEXT NOT NULL,
+        unit_size INTEGER NOT NULL CHECK (unit_size > 0),
+        unit_price_micros INTEGER NOT NULL CHECK (unit_price_micros >= 0),
+        quantity INTEGER NOT NULL CHECK (quantity > 0),
+        currency TEXT NOT NULL CHECK (length(currency) = 3),
+        estimated_cost_micros INTEGER NOT NULL CHECK (estimated_cost_micros > 0),
+        source_url TEXT NOT NULL,
+        quoted_at INTEGER NOT NULL
+      );
       CREATE UNIQUE INDEX IF NOT EXISTS generation_task_provider_id
         ON generation_task(provider, provider_task_id) WHERE provider_task_id IS NOT NULL;
       CREATE TABLE IF NOT EXISTS task_reservation (
@@ -273,6 +292,8 @@ export class ProductionStore {
     `);
     db.query("INSERT INTO schema_migration(version, applied_at) VALUES (1, ?) ON CONFLICT(version) DO NOTHING")
       .run(Date.now());
+    db.query("INSERT INTO schema_migration(version, applied_at) VALUES (2, ?) ON CONFLICT(version) DO NOTHING")
+      .run(Date.now());
   }
 
   private atomic<T>(operation: () => T): T {
@@ -295,6 +316,13 @@ export class ProductionStore {
 
   getTask(id: string): Task {
     return toTask(this.row(id));
+  }
+
+  getTaskPriceSnapshot(taskId: string): TaskPriceSnapshot | null {
+    return this.db.query(`SELECT task_id AS taskId, price_rule_id AS priceRuleId, unit,
+      unit_size AS unitSize, unit_price_micros AS unitPriceMicros, quantity, currency,
+      estimated_cost_micros AS estimatedCostMicros, source_url AS sourceUrl, quoted_at AS quotedAt
+      FROM task_price_snapshot WHERE task_id = ?`).get(taskId) as TaskPriceSnapshot | null;
   }
 
   setBudget(limitMicros: number, currency: string) {
@@ -327,6 +355,41 @@ export class ProductionStore {
   createTaskAndBeginSubmission(input: TaskInput): DispatchResult {
     return this.atomic(() => {
       const created = this.createTaskInTransaction(input);
+      return this.beginSubmissionInTransaction(created.task.id);
+    });
+  }
+
+  /** New priced submissions freeze the confirmed rate, quote, and budget reservation together. */
+  createPricedTaskAndBeginSubmission(input: PricedTaskInput): DispatchResult {
+    const modelId = input.modelId?.trim() ?? "";
+    if (!modelId || !input.unit.trim() || !Number.isSafeInteger(input.quantity) || input.quantity < 1) {
+      throw new TypeError("Priced tasks require a model, billing unit, and positive safe-integer quantity.");
+    }
+    if (input.stage === "synthesis") throw new TypeError("Local synthesis is not a paid model task.");
+    return this.atomic(() => {
+      const { unit, quantity, ...taskInput } = input;
+      const billingUnit = unit.trim();
+      const old = this.db.query(`SELECT ${taskColumns} FROM generation_task WHERE idempotency_key = ?`)
+        .get(input.idempotencyKey) as TaskRow | null;
+      if (old) {
+        const snapshot = this.getTaskPriceSnapshot(old.id);
+        if (!snapshot || snapshot.unit !== billingUnit || snapshot.quantity !== quantity) {
+          throw new Error("Idempotency key reused for a different price request.");
+        }
+        const created = this.createTaskInTransaction({ ...taskInput,
+          estimatedCostMicros: snapshot.estimatedCostMicros, currency: snapshot.currency, billable: true });
+        return this.beginSubmissionInTransaction(created.task.id);
+      }
+      const quotedAt = Date.now();
+      const quote = this.globalBudgets.quotePrice(input.provider, modelId, billingUnit, quantity, quotedAt);
+      if (quote.amountMicros < 1) throw new Error("Paid model task requires a positive confirmed price.");
+      const created = this.createTaskInTransaction({ ...taskInput,
+        estimatedCostMicros: quote.amountMicros, currency: quote.currency, billable: true });
+      this.db.query(`INSERT INTO task_price_snapshot(task_id, price_rule_id, unit, unit_size,
+        unit_price_micros, quantity, currency, estimated_cost_micros, source_url, quoted_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(created.task.id, quote.rule.id, billingUnit,
+          quote.rule.unitSize, quote.rule.unitPriceMicros, quantity, quote.currency,
+          quote.amountMicros, quote.rule.sourceUrl, quotedAt);
       return this.beginSubmissionInTransaction(created.task.id);
     });
   }
@@ -765,6 +828,16 @@ export class ProductionStore {
         unitPriceMicros ?? null, pricingRef?.trim() ?? null, status, Date.now());
   }
 
+  private chargeDetailsForTask(id: string, details: ChargeDetails): ChargeDetails {
+    const snapshot = this.getTaskPriceSnapshot(id);
+    if (!snapshot) return details;
+    if (details.pricingRef && details.pricingRef !== snapshot.priceRuleId) {
+      throw new Error("Charge price rule differs from the task's confirmed quote.");
+    }
+    return { ...details, pricingRef: snapshot.priceRuleId,
+      status: details.status ?? (details.units === undefined ? "manual" : "reconciled") };
+  }
+
   recordCharge(id: string, sourceRef: string, amountMicros: number, currency: string, details: ChargeDetails = {}) {
     currency = currency.toUpperCase();
     assertMoney(amountMicros, currency);
@@ -772,14 +845,15 @@ export class ProductionStore {
     return this.atomic(() => {
       const task = this.row(id);
       if (currency !== task.currency) throw new Error(`Charge currency mismatch: ${currency} != ${task.currency}`);
-      this.globalBudgets.recordCharge(toTask(task), sourceRef, amountMicros, currency, details);
+      const pricedDetails = this.chargeDetailsForTask(id, details);
+      this.globalBudgets.recordCharge(toTask(task), sourceRef, amountMicros, currency, pricedDetails);
       const existing = this.db.query("SELECT amount_micros, currency FROM cost_ledger WHERE source_ref = ?")
         .get(sourceRef) as { amount_micros: number; currency: string } | null;
       if (existing) {
         if (existing.amount_micros !== amountMicros || existing.currency !== currency) throw new Error("Charge reference reused with different amount.");
         return false;
       }
-      this.insertCharge(id, sourceRef, amountMicros, currency, details);
+      this.insertCharge(id, sourceRef, amountMicros, currency, pricedDetails);
       return true;
     });
   }
@@ -793,7 +867,8 @@ export class ProductionStore {
       const task = this.row(id);
       if (!task.billable) throw new Error("A non-billable task cannot settle provider cost.");
       if (currency !== task.currency) throw new Error(`Settlement currency mismatch: ${currency} != ${task.currency}`);
-      this.globalBudgets.settle(toTask(task), sourceRef, actualCostMicros, currency, details);
+      const pricedDetails = this.chargeDetailsForTask(id, details);
+      this.globalBudgets.settle(toTask(task), sourceRef, actualCostMicros, currency, pricedDetails);
       const existing = this.db.query("SELECT task_id, amount_micros, currency FROM cost_ledger WHERE source_ref = ?")
         .get(sourceRef) as { task_id: string; amount_micros: number; currency: string } | null;
       let inserted = false;
@@ -802,7 +877,7 @@ export class ProductionStore {
           throw new Error("Settlement reference reused with different task or amount.");
         }
       } else {
-        this.insertCharge(id, sourceRef, actualCostMicros, currency, details);
+        this.insertCharge(id, sourceRef, actualCostMicros, currency, pricedDetails);
         inserted = true;
       }
       this.db.query(`UPDATE task_reservation SET state = 'settled', updated_at = ?
