@@ -17,6 +17,11 @@ const router = createRouter({
     },
     {
       path: "/home",
+      component: () => publicWeb.value ? import("@/pages/home/index.vue") : import("@/pages/production/home.vue"),
+    },
+    {
+      path: "/classic-home",
+      beforeEnter: () => publicWeb.value ? { path: "/home", replace: true } : true,
       component: () => import("@/pages/home/index.vue"),
     },
     {
