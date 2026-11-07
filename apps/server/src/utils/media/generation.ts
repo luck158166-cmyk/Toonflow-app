@@ -11,7 +11,7 @@ import { lockWorkspaceFiles, resolveWorkspacePath, writeWorkspaceFile } from "@/
 import { beginGeneration, getProviderPrice } from "@/utils/media/billing";
 import { detectMimeType, readPriceReference } from "@/utils/media/priceReference";
 import { modelGateway } from "@/utils/multiTenant/gateway";
-import { assertProductionGenerationGate } from "@/utils/production/generationGate";
+import { assertProductionGenerationGate, assertProductionReferenceBytes, assertProductionProviderRevision } from "@/utils/production/generationGate";
 
 const maxMediaSize = 100 * 1024 * 1024;
 export type MediaGenerationCheckpoint = {
@@ -92,6 +92,7 @@ export async function readReference(cwd: string, reference: MediaReference, medi
   if (!info.isFile() || info.size > maxMediaSize) invalid("参考媒体须为不超过 100 MB 的文件");
   const bytes = await readFile(path, { signal });
   if (!bytes.length || bytes.length > maxMediaSize) invalid("参考媒体为空或超过 100 MB");
+  assertProductionReferenceBytes(cwd, reference.path, bytes);
   const mimeType = detectMimeType(bytes, reference.mimeType);
   if (!mimeType.startsWith(`${mediaType}/`)) invalid(t`参考媒体类型须为 ${mediaType}`);
   return { type: "base64", data: bytes.toString("base64"), mimeType, name: reference.path };
@@ -210,6 +211,7 @@ async function configuredProvider(request: MediaGenerationRequest, mediaType: "i
     return { provider, request: { ...request, providerId: provider.id, modelId: upstream.upstreamModelId } };
   }
   const info = await getMediaProvider(request.providerId);
+  if (!resume) await assertProductionProviderRevision(directory, info.revision);
   if (!resume && !info.models.some(model => model.id === request.modelId && model.type === mediaType)) invalid("所选媒体模型不存在或类型不匹配，请重新选择");
   const configurations = record(conf.get("settings", {}).mediaProviderConfigs);
   const provider = await loadMediaProviderSource(info.source, record(configurations[info.id]), signal, undefined, directory, saveTaskData);

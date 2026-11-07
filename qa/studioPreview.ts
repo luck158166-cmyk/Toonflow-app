@@ -26,7 +26,10 @@ if (new URLSearchParams(location.search).get("stage") === "videoTasks") {
   document.querySelector("#notice")!.textContent = "片段规划验证 · 临时工作区真实读写 · 无模型调用";
   const fixture = await (await fetch("/qa/referenceFixture")).json();
   const { default: segmentPlanPanel } = await import("../apps/web/src/pages/production/segmentPlanPanel.vue");
-  createApp({ render: () => h(segmentPlanPanel, { directory: fixture.directory, projectId: fixture.projectId, episodes: fixture.episodes }) }).mount("#app");
+  const { createPinia } = await import("../apps/web/node_modules/pinia/dist/pinia.js");
+  createApp({ render: () => h(segmentPlanPanel, { directory: fixture.directory, projectId: fixture.projectId, episodes: fixture.episodes,
+    onOpenCosts: () => { document.querySelector("#notice")!.textContent = "已触发价格与预算导航 · QA"; },
+    onChanged: () => { document.querySelector("#notice")!.textContent = "已触发任务刷新 · QA 模型请求已拦截模拟"; } }) }).use(createPinia()).mount("#app");
 } else if (new URLSearchParams(location.search).get("stage") === "preparation") {
   document.querySelector("#notice")!.textContent = "镜头资料验证 · 临时工作区真实读写 · 图片为测试像素";
   const fixture = await (await fetch("/qa/referenceFixture")).json();

@@ -13,6 +13,7 @@
         <p v-for="(check, index) in segment.checks.filter(item => item.state === 'failed')" :key="index" class="issues">{{ check.message }}</p>
         <details><summary>查看统一素材与提示词</summary><div class="referenceList"><span v-for="slot in segment.references" :key="slot.index">图片 {{ slot.index }} · {{ slot.name }} · {{ roleLabel(slot.role) }} · {{ slot.reference ? `v${slot.reference.version}` : '缺图' }}</span></div><pre>{{ segment.requestDraft.prompt }}</pre></details>
         <details><summary>检查与待验证事项</summary><p v-for="(check, index) in segment.checks" :key="index">{{ check.state === 'passed' ? '已检查' : check.state === 'pending' ? '待验证' : '需处理' }} · {{ check.message }}</p></details>
+        <segmentExecutionPanel :directory="directory" :projectId="projectId" :episodeId="selectedId" :inputHash="report.inputHash" :sequence="segment.sequence" :saved="!!saved" @openCosts="emit('openCosts')" @changed="emit('changed')" />
       </article>
       <div class="actions"><el-button type="primary" :loading="saving" :disabled="loading || !report.canSave || !!saved" @click="save">{{ saved ? `当前方案已保存为 v${saved.version}` : '保存本集片段方案' }}</el-button><span>只保存制作候选，不启动付费生成。</span></div>
       <p class="notice">平台素材信任、内容语义质检与真实模型效果仍待验证。旧镜头若缺场次或导演资料会显示缺项；不会按地点猜测场次，也不会静默改变镜头时长。</p>
@@ -26,6 +27,8 @@ import axios from "axios";
 import { ref, computed, watch, onBeforeUnmount } from "vue";
 import { ElMessage } from "element-plus";
 import productionApi, { type SegmentPlan, type ReferenceRole } from "@/lib/productionApi";
+import segmentExecutionPanel from "./segmentExecutionPanel.vue";
+const emit = defineEmits<{ changed: []; openCosts: [] }>();
 const props = defineProps<{ directory: string; projectId: string; episodes: Array<{ id: string; episodeNumber: number; title: string }> }>();
 const selectedId = ref(""); const report = ref<SegmentPlan | null>(null);
 const loading = ref(false); const saving = ref(false); const errorText = ref(""); let version = 0;

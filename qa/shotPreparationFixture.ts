@@ -2,6 +2,13 @@ import { applyEpisodeDraft, type ProductionCatalog, type EpisodeDraft } from "..
 import { getEpisodeReview, reviewEpisode } from "../packages/production/src/episodeReview";
 import { listReferenceTargets, bindAssetReference, type BindReferenceInput } from "../packages/production/src/assetReference";
 import { indexNovel } from "../packages/production/src/novelAdaptation";
+export function scenicDraft(draft: EpisodeDraft) {
+  draft.characters = []; draft.props = [];
+  draft.script[0]!.characters = []; draft.script[0]!.beats = [{ type: "action", text: "候车厅空镜，灯光映在地面。" }];
+  draft.shots.forEach(shot => { shot.characterNames = []; shot.propUses = []; shot.dialogue = [];
+    shot.scriptExcerpt = "候车厅空镜，灯光映在地面。"; shot.title = "候车厅空镜";
+    shot.direction = { summary: "空候车厅灯光照亮地面", action: "灯光平稳照亮地面", positions: [], camera: "固定", environment: "夜间候车厅冷色顶灯照明", style: "写实", sound: "风声" }; });
+}
 
 export function createShotFixture(catalog: ProductionCatalog, changeDraft?: (draft: EpisodeDraft) => void) {
   const sourceText = "第一章 交接\n" + "林岚把钥匙交给陈墨，陈墨收好钥匙。".repeat(12);

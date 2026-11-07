@@ -4,15 +4,16 @@ import { getShotPreparation, type ShotReferenceSlot } from "./shotPreparation";
 import { cameraMoves, validateShotDirection } from "./shotDirection";
 
 type PromptCheck = { code: string; state: "passed" | "failed" | "pending"; message: string };
-const templateVersion = "seedance25Shot.v1";
+const templateVersion = "seedance25Shot.v2";
 const audioConstraint = "只保留角色人声、环境音和动作音效；不要音乐、背景音乐、BGM、配乐、器乐、旋律、合成器音效、氛围铺底音。不要字幕。";
 const roleNames = { headshot: "面部参考", fullBody: "全身妆造参考", costume: "服装参考", scene: "场景参考", prop: "道具参考" };
 
 export function renderVideoPrompt(references: ShotReferenceSlot[], characterCount: number, summary: string, frames: string[], environment: string, style: string) {
   const mappings = references.map(slot => `图片${slot.index}是${slot.name}的${roleNames[slot.role]}`).join("；");
+  const castConstraint = characterCount ? `人物面部与参考图保持一致；画面只出现${characterCount}名已绑定角色，同一画面每个角色只出现一次，禁止同款分身、双胞胎；人物眼睛为正常人眼。` : "本片段为空镜，画面不出现人物。";
   return [`【素材】${mappings}。`, `【音频约束】${audioConstraint}`, `【概述】${summary}`, ...frames,
     `【全片】${environment}；${style}。`,
-    `【约束】人物面部与参考图保持一致；画面只出现${characterCount}名已绑定角色，同一画面每个角色只出现一次，禁止同款分身、双胞胎；人物眼睛为正常人眼。不要字幕、不要水印、不要 Logo、不要文字。${audioConstraint}`].join("\n");
+    `【约束】${castConstraint}不要字幕、不要水印、不要 Logo、不要文字。${audioConstraint}`].join("\n");
 }
 
 /** Reused by single-shot and segment compilers. No database writes or provider calls. */
@@ -42,16 +43,21 @@ export function compilePreparedShot(preparation: ReturnType<typeof getShotPrepar
     const kind = line.kind === "dialogue" ? "台词" : ({ narration: "旁白", voiceover: "画外音", phone: "电话音" } as Record<string, string>)[line.kind] ?? "台词";
     return `${name}${kind}（${line.emotion || "自然"}）：${JSON.stringify(line.text)}`;
   });
-  const frame = direction ? `${startSeconds}-${startSeconds + seconds}秒：${shot.shotSize}，${direction.camera}。${positions}。${direction.action}。${propText}。${lines.join("。")}${direction.sound ? `。<${direction.sound}>` : ""}` : "";
+  const frame = direction ? `${startSeconds}-${startSeconds + seconds}秒：` + [
+    `${shot.shotSize}，${direction.camera}`, positions, direction.action, propText, ...lines,
+    direction.sound ? `<${direction.sound}>` : "",
+  ].filter(Boolean).join("。") : "";
   const prompt = direction ? renderVideoPrompt(references, characters.length, direction.summary, [frame], direction.environment, direction.style) : "";
   // Data must never add material numbers, timestamps, template headers or operational instructions.
   const dataText = [creativeText, ...references.map(item => item.name), shot.shotSize,
     ...dialogue.flatMap(line => [line.text, line.emotion, line.speakerName ?? ""]), propText].join("\n");
   check("P16", !/(?:[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}|(?:https?:\/\/|[a-z]:\\|assets\/)|\.(?:png|jpe?g|webp|mp4)\b|(?:图片|视频|音频)\s*\d|\d+\s*[-~]\s*\d+\s*秒|【|】|避免跳轴|忽略.*指令|调用工具)/i.test(dataText), "创作字段不能混入内部 ID、路径、素材编号、模板指令或时间戳");
   check("P18", [...prompt].length > 0 && [...prompt].length <= 4000, "项目提示词上限 4000 字符，超限须重新组织镜头，不截断");
-  checks.push({ code: "P14", state: "pending", message: "当前原图为用户绑定，尚无可验证的平台人脸信任与有效期记录" },
-    { code: "P17", state: "pending", message: "尚未校准人物发音与实际音频；对白原文保持不变" },
-    { code: "contentQuality", state: "pending", message: "站位、动作、表情与前后镜连续性仍需内容质检和真实模型基准，静态检查不能证明可拍性" });
+  checks.push({ code: "P14", state: characters.length ? "pending" : "passed", message: characters.length
+    ? "当前人物原图为用户绑定，尚无可验证的平台人脸信任与有效期记录" : "本镜无已声明出场人物；投产复核仍需确认场景和道具图中没有遗漏人物" },
+    { code: "P17", state: dialogue.length ? "pending" : "passed", message: dialogue.length
+      ? "对白发音、生僻字与多音字尚待投产前复核；生成后另行核对实际音频" : "本镜没有对白、旁白或画外音文本" },
+    { code: "contentQuality", state: "pending", message: "站位、动作、表情、素材内容与前后镜连续性需投产前复核；生成后另行质检，不以静态检查替代" });
   const snapshot = { templateVersion, preparationHash: preparation.inputHash, input: preparation.snapshot,
     requestDraft: { model: "doubao-seedance-2-5-260628", duration: seconds, ratio: "9:16", resolution: "1080p",
       generateAudio: true, prompt, references: references.map(slot => ({ index: slot.index, referenceId: slot.reference?.id ?? null,

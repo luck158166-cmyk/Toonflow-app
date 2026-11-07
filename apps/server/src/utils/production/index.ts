@@ -3,6 +3,15 @@ import { dirname, resolve } from "node:path";
 import { lstat, mkdir, realpath } from "@toonflow/file";
 import { ProductionCatalog, ProductionStore, indexNovel } from "@toonflow/production";
 export { createProjectBackup } from "./projectBackup";
+export async function inspectSegmentExecution(...args: Parameters<typeof import("./segmentExecution").inspectSegmentExecution>) {
+  return (await import("./segmentExecution")).inspectSegmentExecution(...args);
+}
+export async function recordSegmentPreflight(...args: Parameters<typeof import("./segmentExecution").recordSegmentPreflight>) {
+  return (await import("./segmentExecution")).recordSegmentPreflight(...args);
+}
+export async function executeSegmentVideo(...args: Parameters<typeof import("./segmentExecution").executeSegmentVideo>) {
+  return (await import("./segmentExecution")).executeSegmentVideo(...args);
+}
 export async function recoverProductionVideoTask(directory: string, projectId: string, taskId: string) {
   return (await import("./videoTasks")).recoverProductionVideoTask(directory, projectId, taskId);
 }

@@ -29,6 +29,12 @@ export type CompiledShotPrompt = { inputHash: string; canSave: boolean; readyFor
     requestDraft: { model: string; duration: number; ratio: string; resolution: string; prompt: string };
     checks: Array<{ code: string; state: "passed" | "failed" | "pending"; message: string }> } };
 export type SourceKind = "synopsis" | "novel" | "script";
+export type SegmentExecutionRequest = { directory: string; projectId: string; episodeId: string; inputHash: string; sequence: number };
+export type SegmentExecutionPreview = { planHash: string; canSubmit: boolean; requestJson: string; destination: string;
+  review: { id: string; note: string; createdAt: number } | null; blockers: Array<{ code: string; message: string }>;
+  price: { estimatedCostMicros: number; sourceUrl: string; quantity: number } | null;
+  references: SegmentPlan["snapshot"]["segments"][number]["references"];
+  existingTask: { id: string; state: string; requestStarted: boolean } | null };
 export type SegmentPlan = { inputHash: string; canSave: boolean; readyForGeneration: false;
   fileIssues: Array<{ message: string }>; history: Array<{ id: string; version: number; inputHash: string; createdAt: number }>;
   snapshot: { segments: Array<{ sequence: number; sceneSequence: number | null; boundaryReason: string;
@@ -102,6 +108,15 @@ export type BudgetOverview = { global: BudgetUsage; globalHistory: BudgetChange[
 const client = axios.create({ baseURL: "/api/production", headers: { "x-toonflow-workspace": "1" } });
 
 const productionApi = {
+  async previewSegmentVideo(input: SegmentExecutionRequest) {
+    const { data } = await client.post<{ data: SegmentExecutionPreview }>("/previewSegmentVideo", input); return data.data;
+  },
+  async reviewSegmentPreflight(input: SegmentExecutionRequest, review: { actionConfirmed: true; continuityConfirmed: true; dialogueConfirmed: true; referencesConfirmed: true; note: string }) {
+    await client.post("/reviewSegmentPreflight", { ...input, review });
+  },
+  async runSegmentVideo(input: SegmentExecutionRequest, approval: { approved: true; maxCalls: 1; planHash: string; maxCostMicros: number }) {
+    const { data } = await client.post<{ data: { taskId: string; state: string; message: string } }>("/runSegmentVideo", { ...input, approval }); return data.data;
+  },
   async getSegmentPlan(directory: string, projectId: string, episodeId: string) {
     const { data } = await client.get<{ data: SegmentPlan }>("/getSegmentPlan", { params: { directory, projectId, episodeId } });
     return data.data;

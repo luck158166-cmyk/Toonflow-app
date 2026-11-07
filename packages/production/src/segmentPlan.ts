@@ -90,7 +90,7 @@ export function getEpisodeSegmentPlan(catalog: ProductionCatalog, projectId: str
     const selected = choice.get(index)!;
     segments.push({ ...selected.segment, sequence: segments.length + 1 }); index = selected.end;
   }
-  const snapshot = { templateVersion: "seedance25Segments.v1", projectId, episodeId,
+  const snapshot = { templateVersion: "seedance25Segments.v2", projectId, episodeId,
     inputs: inputs.map(input => ({ inputHash: input.inputHash, snapshot: input.snapshot })), segments };
   const inputHash = createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
   const history = catalog.db.query(`SELECT id, version, input_hash AS inputHash, created_at AS createdAt FROM episode_segment_plan

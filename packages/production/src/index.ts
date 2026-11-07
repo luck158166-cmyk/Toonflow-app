@@ -9,6 +9,7 @@ export * from "./shotPreparation";
 export * from "./shotDirection";
 export * from "./shotPrompt";
 export * from "./segmentPlan";
+export * from "./segmentExecution";
 export * from "./store";
 export * from "./globalBudgetCoordinator";
 export * from "./dispatcher";

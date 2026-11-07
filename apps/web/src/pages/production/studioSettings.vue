@@ -6,6 +6,7 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import settings from "@/components/settings/index.vue";
+const props = withDefaults(defineProps<{ panel?: "languageModel" | "mediaModel" }>(), { panel: "languageModel" });
 
 const settingsPanel = ref<InstanceType<typeof settings>>();
 const settingsVisible = ref(false);
@@ -13,7 +14,7 @@ const emit = defineEmits<{ closed: [] }>();
 watch(settingsVisible, (visible, previous) => { if (!visible && previous) emit("closed"); });
 
 function openSettings() {
-  if (!settingsPanel.value?.openPanel("languageModel")) settingsVisible.value = true;
+  if (!settingsPanel.value?.openPanel(props.panel)) settingsVisible.value = true;
 }
 </script>
 

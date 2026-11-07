@@ -52,7 +52,7 @@ function snapshotProjectGlobal(sourcePath: string, destinationPath: string, proj
         copyTable(source, target, "price_rule", `WHERE id IN (SELECT price_rule_id FROM task_price_snapshot
           JOIN generation_task ON generation_task.id = task_price_snapshot.task_id WHERE generation_task.project_id = ?)`, [projectId]);
         copyTable(source, target, "generation_task", "WHERE project_id = ?", [projectId]);
-        for (const table of ["task_price_snapshot", "task_reservation", "cost_ledger", "media_output", "media_download", "text_output", "text_task_authorization"]) {
+        for (const table of ["task_price_snapshot", "task_reservation", "cost_ledger", "media_output", "media_download", "text_output", "text_task_authorization", "host_media_binding"]) {
           copyTable(source, target, table, `WHERE task_id IN (SELECT id FROM generation_task WHERE project_id = ?)`, [projectId]);
         }
         for (const table of ["synthesis_version", "synthesis_export", "global_task_reservation", "global_cost_ledger"]) {
@@ -157,6 +157,18 @@ export async function createProjectBackup(directory: string, dataDirectory: stri
     await collect(directory);
     await addFile("workspace/.production/production.db", await readFile(catalogPath));
     await addFile("globalProject.db", await readFile(globalSnapshotPath));
+    // Native receipts live in the host data directory, not the workspace. Preserve them with their production bindings.
+    const globalSnapshot = new Database(globalSnapshotPath, { readonly: true });
+    let hostTasks: Array<{ taskId: string; workspace: string }>;
+    try { hostTasks = globalSnapshot.query("SELECT task_id AS taskId, workspace FROM host_media_binding").all() as typeof hostTasks; }
+    finally { globalSnapshot.close(); }
+    const { inspect } = await import("@/utils/media/tasks");
+    const canonicalDirectory = await realpath(directory);
+    for (const binding of hostTasks) {
+      if (binding.workspace !== canonicalDirectory) throw new Error("媒体任务绑定目录不符，不能生成不完整备份");
+      const record = await inspect(canonicalDirectory, binding.taskId);
+      await addFile(`hostMediaTasks/${binding.taskId}.json`, Buffer.from(JSON.stringify({ taskId: binding.taskId, record })));
+    }
     const manifest = { format: "toonflowProjectBackup", version: 1, createdAt: Date.now(),
       projectIds, files: Object.entries(files).map(([path, bytes]) => ({ path, bytes: bytes.byteLength,
         sha256: createHash("sha256").update(bytes).digest("hex") })) };

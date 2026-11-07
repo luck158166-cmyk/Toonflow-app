@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { resolve } from "node:path";
 import { lstat, realpath } from "@toonflow/file";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createHash } from "node:crypto";
 import { serializeHostMediaRequest, type HostMediaBinding } from "@toonflow/production";
 
 const submissionContext = new AsyncLocalStorage<{ directory: string; taskId: string }>();
@@ -9,6 +10,24 @@ const submissionContext = new AsyncLocalStorage<{ directory: string; taskId: str
 /** Internal capability, never accepted from HTTP body/headers. SQLite authorization is rechecked by each gate. */
 export function withProductionMediaSubmission<T>(directory: string, taskId: string, action: () => Promise<T>) {
   return submissionContext.run({ directory, taskId }, action);
+}
+
+/** Check the exact bytes passed to the provider, closing the preview-to-read replacement window. */
+export function assertProductionReferenceBytes(directory: string, path: string, bytes: Uint8Array) {
+  const context = submissionContext.getStore();
+  if (!context || context.directory !== directory) return;
+  const match = /^assets\/productionReferences\/([a-f0-9]{64})\.(png|jpg|webp)$/.exec(path);
+  if (!match || createHash("sha256").update(bytes).digest("hex") !== match[1]) throw new Error("生产参考原图与授权内容不符，已阻止提交");
+}
+
+export async function assertProductionProviderRevision(directory: string | undefined, revision: string) {
+  const context = submissionContext.getStore();
+  if (!context || context.directory !== directory) return;
+  const { withProduction } = await import("./index");
+  await withProduction(directory, (_catalog, store) => {
+    const expected = store.getHostMediaBinding(context.taskId)?.authorization.providerRevision;
+    if (expected && expected !== revision) throw new Error("供应商代码已变化，当前授权不能提交");
+  });
 }
 
 async function existing(path: string) {
