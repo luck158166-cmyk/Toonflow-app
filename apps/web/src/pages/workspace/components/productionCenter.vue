@@ -1,5 +1,7 @@
 <template>
   <el-dialog v-model="visible" title="短剧生产" width="min(900px, calc(100vw - 32px))" appendToBody destroyOnClose>
+    <el-tabs v-model="activeTab">
+      <el-tab-pane label="故事资料" name="stories">
     <div class="productionCenter">
       <section class="storyLibrary">
         <div class="sectionHeading">
@@ -38,6 +40,33 @@
         </div>
       </section>
     </div>
+      </el-tab-pane>
+      <el-tab-pane label="价格规则" name="prices">
+        <div class="priceCenter">
+          <p>价格由你按供应商资料录入；保存规则不会发起模型请求。</p>
+          <el-form labelPosition="top" @submit.prevent="recordPriceRule">
+            <div class="priceFields">
+              <el-form-item label="供应商 ID"><el-input v-model="priceProvider" maxlength="96" /></el-form-item>
+              <el-form-item label="模型 ID"><el-input v-model="priceModel" maxlength="256" /></el-form-item>
+              <el-form-item label="计费单位"><el-input v-model="priceUnit" placeholder="如 token、second、image" maxlength="64" /></el-form-item>
+              <el-form-item label="每单位包含数量"><el-input-number v-model="priceUnitSize" :min="1" :max="1000000000" controlsPosition="right" /></el-form-item>
+              <el-form-item label="每单位价格"><el-input v-model="priceAmount" placeholder="如 2.50" /></el-form-item>
+              <el-form-item label="币种"><el-input v-model="priceCurrency" maxlength="3" /></el-form-item>
+            </div>
+            <el-form-item label="价格来源 HTTPS 链接"><el-input v-model="priceSourceUrl" placeholder="https://" maxlength="2048" /></el-form-item>
+            <div class="priceActions"><el-button type="primary" :loading="savingPrice" @click="recordPriceRule">记录当前生效价格</el-button></div>
+          </el-form>
+          <div class="sectionHeading"><h3>已记录规则</h3><el-button :loading="loadingPrices" @click="loadPriceRules">刷新</el-button></div>
+          <el-table :data="priceRules" v-loading="loadingPrices" maxHeight="260" emptyText="尚未录入价格规则">
+            <el-table-column prop="provider" label="供应商" minWidth="110" />
+            <el-table-column prop="modelId" label="模型" minWidth="160" />
+            <el-table-column label="价格" minWidth="165"><template #default="{ row }">{{ formatPrice(row as PriceRule) }}</template></el-table-column>
+            <el-table-column label="生效时间" minWidth="155"><template #default="{ row }">{{ new Date(row.effectiveAt).toLocaleString() }}</template></el-table-column>
+            <el-table-column label="来源" minWidth="80"><template #default="{ row }"><a :href="row.sourceUrl" target="_blank" rel="noopener noreferrer">查看</a></template></el-table-column>
+          </el-table>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
   </el-dialog>
 </template>
 
@@ -45,10 +74,7 @@
 import axios from "axios";
 import { ElMessage } from "element-plus";
 import { ref, watch } from "vue";
-
-type SourceKind = "synopsis" | "novel" | "script";
-type Story = { id: string; title: string; sourceKind: SourceKind; workflowState: string; createdAt: number; updatedAt: number };
-type StoryDetail = Story & { sourceText: string };
+import productionApi, { type PriceRule, type SourceKind, type Story, type StoryDetail } from "@/lib/productionApi";
 
 const props = defineProps<{ directory: string }>();
 const visible = defineModel<boolean>({ required: true });
@@ -60,12 +86,23 @@ const sourceText = ref("");
 const fileInput = ref<HTMLInputElement>();
 const loading = ref(false);
 const saving = ref(false);
-const headers = { "x-toonflow-workspace": "1" };
+const activeTab = ref("stories");
+const priceRules = ref<PriceRule[]>([]);
+const loadingPrices = ref(false);
+const savingPrice = ref(false);
+const priceProvider = ref("");
+const priceModel = ref("");
+const priceUnit = ref("");
+const priceUnitSize = ref(1);
+const priceAmount = ref("");
+const priceCurrency = ref("CNY");
+const priceSourceUrl = ref("");
 
 watch([visible, () => props.directory], ([open]) => {
   selectedStory.value = null;
   stories.value = [];
-  if (open && props.directory) void loadStories();
+  priceRules.value = [];
+  if (open && props.directory) { void loadStories(); void loadPriceRules(); }
 });
 
 function sourceKindLabel(kind: SourceKind) {
@@ -83,8 +120,8 @@ async function loadStories() {
   if (!directory) return;
   loading.value = true;
   try {
-    const { data } = await axios.get<{ data: { stories: Story[] } }>("/api/production/listStories", { params: { directory }, headers });
-    if (props.directory === directory) stories.value = data.data.stories;
+    const result = await productionApi.listStories(directory);
+    if (props.directory === directory) stories.value = result;
   } catch (cause) {
     ElMessage.error(errorMessage(cause));
   } finally {
@@ -95,8 +132,8 @@ async function loadStories() {
 async function selectStory(projectId: string) {
   const directory = props.directory;
   try {
-    const { data } = await axios.get<{ data: { story: StoryDetail } }>("/api/production/getStory", { params: { directory, projectId }, headers });
-    if (props.directory === directory && visible.value) selectedStory.value = data.data.story;
+    const result = await productionApi.getStory(directory, projectId);
+    if (props.directory === directory && visible.value) selectedStory.value = result;
   } catch (cause) {
     ElMessage.error(errorMessage(cause));
   }
@@ -128,20 +165,58 @@ async function importStory() {
   if (!directory || !title.value.trim() || !sourceText.value.trim() || saving.value) return;
   saving.value = true;
   try {
-    const { data } = await axios.post<{ data: { projectId: string } }>("/api/production/importStory", {
-      directory, title: title.value.trim(), sourceKind: sourceKind.value, sourceText: sourceText.value,
-    }, { headers });
+    const projectId = await productionApi.importStory(directory, title.value.trim(), sourceKind.value, sourceText.value);
     if (props.directory !== directory) return;
     title.value = "";
     sourceText.value = "";
     await loadStories();
-    await selectStory(data.data.projectId);
+    await selectStory(projectId);
     ElMessage.success("故事原文已保存");
   } catch (cause) {
     ElMessage.error(errorMessage(cause));
   } finally {
     saving.value = false;
   }
+}
+
+function priceMicros(value: string) {
+  if (!/^(?:0|[1-9]\d{0,8})(?:\.\d{1,6})?$/.test(value)) throw new Error("价格需为非负数字，最多 6 位小数");
+  const [whole, fraction = ""] = value.split(".");
+  return Number(whole) * 1_000_000 + Number(fraction.padEnd(6, "0"));
+}
+
+function formatPrice(rule: PriceRule) {
+  return `${(rule.unitPriceMicros / 1_000_000).toFixed(6)} ${rule.currency} / ${rule.unitSize} ${rule.unit}`;
+}
+
+async function loadPriceRules() {
+  const directory = props.directory;
+  if (!directory) return;
+  loadingPrices.value = true;
+  try {
+    const rules = await productionApi.listPriceRules(directory);
+    if (props.directory === directory) priceRules.value = rules;
+  } catch (cause) {
+    ElMessage.error(errorMessage(cause));
+  } finally { loadingPrices.value = false; }
+}
+
+async function recordPriceRule() {
+  const directory = props.directory;
+  if (!directory || savingPrice.value) return;
+  savingPrice.value = true;
+  try {
+    await productionApi.recordPriceRule(directory, {
+      provider: priceProvider.value.trim(), modelId: priceModel.value.trim(), unit: priceUnit.value.trim(),
+      unitSize: priceUnitSize.value, unitPriceMicros: priceMicros(priceAmount.value.trim()),
+      currency: priceCurrency.value.trim().toUpperCase(), sourceUrl: priceSourceUrl.value.trim(), effectiveAt: Date.now(),
+    });
+    if (props.directory !== directory) return;
+    await loadPriceRules();
+    ElMessage.success("价格规则已记录");
+  } catch (cause) {
+    ElMessage.error(errorMessage(cause));
+  } finally { savingPrice.value = false; }
 }
 </script>
 
@@ -170,4 +245,11 @@ async function importStory() {
   }
 }
 @media (max-width: 680px) { .productionCenter { grid-template-columns: 1fr; } }
+.priceCenter {
+  p { color: var(--el-text-color-secondary); font-size: 13px; }
+  .priceFields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 12px; }
+  .priceActions { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+  .sectionHeading { display: flex; align-items: center; justify-content: space-between; }
+}
+@media (max-width: 680px) { .priceCenter .priceFields { grid-template-columns: 1fr; } }
 </style>

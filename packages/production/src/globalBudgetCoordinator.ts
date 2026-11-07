@@ -1,5 +1,14 @@
 import type { Database } from "bun:sqlite";
+import { randomUUID } from "node:crypto";
 import type { BudgetScope, BudgetScopeType, ChargeDetails, Task } from "./store";
+
+export type PriceRule = {
+  id: string; provider: string; modelId: string; unit: string; unitSize: number;
+  unitPriceMicros: number; currency: string; sourceUrl: string; effectiveAt: number;
+  recordedBy: string; createdAt: number;
+};
+
+export type PriceRuleInput = Omit<PriceRule, "id" | "createdAt">;
 
 type Usage = {
   configured: boolean; scope: BudgetScope; currency: string | null; limitMicros: number;
@@ -52,11 +61,78 @@ export class GlobalBudgetCoordinator {
         status TEXT NOT NULL CHECK (status IN ('reconciled','manual')),
         created_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS price_rule (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        model_id TEXT NOT NULL,
+        unit TEXT NOT NULL,
+        unit_size INTEGER NOT NULL CHECK (unit_size > 0),
+        unit_price_micros INTEGER NOT NULL CHECK (unit_price_micros >= 0),
+        currency TEXT NOT NULL CHECK (length(currency) = 3),
+        source_url TEXT NOT NULL,
+        effective_at INTEGER NOT NULL,
+        recorded_by TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS price_rule_lookup ON price_rule(provider, model_id, unit, effective_at DESC, created_at DESC);
       CREATE INDEX IF NOT EXISTS global_cost_project_date ON global_cost_ledger(project_id, usage_date, currency);
       CREATE INDEX IF NOT EXISTS global_reservation_scope ON global_task_reservation(project_id, state, currency);
     `);
     db.query(`INSERT INTO global_schema_migration(version, applied_at) VALUES (1, ?)
       ON CONFLICT(version) DO NOTHING`).run(Date.now());
+    db.query(`INSERT INTO global_schema_migration(version, applied_at) VALUES (2, ?)
+      ON CONFLICT(version) DO NOTHING`).run(Date.now());
+  }
+
+  recordPriceRule(input: PriceRuleInput): PriceRule {
+    const provider = input.provider.trim();
+    const modelId = input.modelId.trim();
+    const unit = input.unit.trim();
+    const recordedBy = input.recordedBy.trim();
+    if (!provider || !modelId || !unit || !recordedBy) throw new TypeError("Price rule identity, unit, and author are required.");
+    if (!Number.isSafeInteger(input.unitSize) || input.unitSize < 1
+      || !Number.isSafeInteger(input.unitPriceMicros) || input.unitPriceMicros < 0
+      || !Number.isSafeInteger(input.effectiveAt) || input.effectiveAt < 0) {
+      throw new RangeError("Price rule size, price, and effective time must be non-negative safe integers.");
+    }
+    const currency = input.currency.toUpperCase();
+    if (!/^[A-Z]{3}$/.test(currency)) throw new TypeError("Currency must be a three-letter code.");
+    let url: URL;
+    try { url = new URL(input.sourceUrl); }
+    catch { throw new TypeError("Price rule source must be an HTTPS URL."); }
+    if (url.protocol !== "https:" || input.sourceUrl.length > 2048) throw new TypeError("Price rule source must be an HTTPS URL.");
+    const rule = { ...input, id: randomUUID(), provider, modelId, unit, currency,
+      sourceUrl: url.toString(), recordedBy, createdAt: Date.now() };
+    this.atomic(() => this.db.query(`INSERT INTO price_rule(id, provider, model_id, unit, unit_size,
+      unit_price_micros, currency, source_url, effective_at, recorded_by, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(rule.id, rule.provider, rule.modelId,
+      rule.unit, rule.unitSize, rule.unitPriceMicros, rule.currency, rule.sourceUrl,
+      rule.effectiveAt, rule.recordedBy, rule.createdAt));
+    return rule;
+  }
+
+  quotePrice(provider: string, modelId: string, unit: string, quantity: number, at = Date.now()) {
+    if (!Number.isSafeInteger(quantity) || quantity < 0 || !Number.isSafeInteger(at) || at < 0) {
+      throw new RangeError("Price quantity and quote time must be non-negative safe integers.");
+    }
+    const row = this.db.query(`SELECT id, provider, model_id AS modelId, unit, unit_size AS unitSize,
+      unit_price_micros AS unitPriceMicros, currency, source_url AS sourceUrl,
+      effective_at AS effectiveAt, recorded_by AS recordedBy, created_at AS createdAt
+      FROM price_rule WHERE provider = ? AND model_id = ? AND unit = ? AND effective_at <= ?
+      ORDER BY effective_at DESC, created_at DESC, id DESC LIMIT 1`)
+      .get(provider.trim(), modelId.trim(), unit.trim(), at) as PriceRule | null;
+    if (!row) throw new Error("No confirmed price rule for this provider, model, unit, and time.");
+    const micros = (BigInt(quantity) * BigInt(row.unitPriceMicros) + BigInt(row.unitSize) - 1n) / BigInt(row.unitSize);
+    if (micros > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError("Quoted cost exceeds safe integer range.");
+    return { rule: row, quantity, amountMicros: Number(micros), currency: row.currency };
+  }
+
+  listPriceRules(limit = 100): PriceRule[] {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new RangeError("Price rule limit must be between 1 and 1000.");
+    return this.db.query(`SELECT id, provider, model_id AS modelId, unit, unit_size AS unitSize,
+      unit_price_micros AS unitPriceMicros, currency, source_url AS sourceUrl,
+      effective_at AS effectiveAt, recorded_by AS recordedBy, created_at AS createdAt
+      FROM price_rule ORDER BY created_at DESC, id DESC LIMIT ?`).all(limit) as PriceRule[];
   }
 
   private atomic<T>(operation: () => T): T {
