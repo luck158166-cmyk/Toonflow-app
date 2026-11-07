@@ -52,7 +52,7 @@ function snapshotProjectGlobal(sourcePath: string, destinationPath: string, proj
         copyTable(source, target, "price_rule", `WHERE id IN (SELECT price_rule_id FROM task_price_snapshot
           JOIN generation_task ON generation_task.id = task_price_snapshot.task_id WHERE generation_task.project_id = ?)`, [projectId]);
         copyTable(source, target, "generation_task", "WHERE project_id = ?", [projectId]);
-        for (const table of ["task_price_snapshot", "task_reservation", "cost_ledger", "media_output", "media_download"]) {
+        for (const table of ["task_price_snapshot", "task_reservation", "cost_ledger", "media_output", "media_download", "text_output"]) {
           copyTable(source, target, table, `WHERE task_id IN (SELECT id FROM generation_task WHERE project_id = ?)`, [projectId]);
         }
         for (const table of ["synthesis_version", "synthesis_export", "global_task_reservation", "global_cost_ledger"]) {

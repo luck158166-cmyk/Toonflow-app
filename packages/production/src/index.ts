@@ -4,6 +4,7 @@ export * from "./adaptationInput";
 export * from "./store";
 export * from "./globalBudgetCoordinator";
 export * from "./dispatcher";
+export * from "./textWorker";
 export * from "./providerReconciler";
 export * from "./mediaDownloadWorker";
 export * from "./workspaceMediaDownloader";

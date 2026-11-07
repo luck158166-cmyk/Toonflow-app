@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Database } from "bun:sqlite";
 import { GlobalBudgetCoordinator } from "./globalBudgetCoordinator";
+import { migrateTextTaskStage } from "./taskStageMigration";
 
-export type TaskStage = "image" | "video" | "speech" | "transcription" | "synthesis";
+export type TaskStage = "image" | "video" | "speech" | "transcription" | "synthesis" | "text";
 export type TaskState = "queued" | "dispatching" | "running" | "reconciling" | "reconcile_required" | "succeeded" | "failed" | "paused";
 
 export type TaskInput = {
@@ -181,7 +182,7 @@ export class ProductionStore {
         project_id TEXT NOT NULL,
         episode_id TEXT NOT NULL,
         shot_id TEXT,
-        stage TEXT NOT NULL CHECK (stage IN ('image','video','speech','transcription','synthesis')),
+        stage TEXT NOT NULL CHECK (stage IN ('image','video','speech','transcription','synthesis','text')),
         provider TEXT NOT NULL,
         model_id TEXT NOT NULL DEFAULT '',
         request_json TEXT NOT NULL,
@@ -290,9 +291,17 @@ export class ProductionStore {
       CREATE INDEX IF NOT EXISTS generation_task_recovery
         ON generation_task(state, request_started, provider_task_id);
     `);
+    migrateTextTaskStage(db);
+    db.exec(`CREATE TABLE IF NOT EXISTS text_output (
+      task_id TEXT PRIMARY KEY REFERENCES generation_task(id),
+      response_text TEXT NOT NULL, response_sha256 TEXT NOT NULL,
+      provider_request_id TEXT NOT NULL, usage_json TEXT NOT NULL, created_at INTEGER NOT NULL
+    );`);
     db.query("INSERT INTO schema_migration(version, applied_at) VALUES (1, ?) ON CONFLICT(version) DO NOTHING")
       .run(Date.now());
     db.query("INSERT INTO schema_migration(version, applied_at) VALUES (2, ?) ON CONFLICT(version) DO NOTHING")
+      .run(Date.now());
+    db.query("INSERT INTO schema_migration(version, applied_at) VALUES (3, ?) ON CONFLICT(version) DO NOTHING")
       .run(Date.now());
   }
 
@@ -607,7 +616,8 @@ export class ProductionStore {
       t.estimated_cost_micros AS estimatedCostMicros, t.currency,
       COALESCE(r.amount_micros, 0) AS reservedMicros,
       COALESCE((SELECT SUM(c.amount_micros) FROM cost_ledger c WHERE c.task_id = t.id), 0) AS chargedMicros,
-      (SELECT COUNT(*) FROM media_output o WHERE o.task_id = t.id) AS outputCount,
+      ((SELECT COUNT(*) FROM media_output o WHERE o.task_id = t.id)
+        + (SELECT COUNT(*) FROM text_output x WHERE x.task_id = t.id)) AS outputCount,
       t.created_at AS createdAt, t.updated_at AS updatedAt
       FROM generation_task t LEFT JOIN task_reservation r ON r.task_id = t.id AND r.state = 'active'
       WHERE t.project_id = ? ORDER BY t.created_at DESC, t.id DESC`).all(projectId) as Array<{
@@ -931,7 +941,38 @@ export class ProductionStore {
     });
   }
 
+  getTextOutput(id: string) {
+    return this.db.query(`SELECT response_text AS responseText, response_sha256 AS sha256,
+      provider_request_id AS providerRequestId, usage_json AS usageJson FROM text_output WHERE task_id = ?`)
+      .get(id) as { responseText: string; sha256: string; providerRequestId: string; usageJson: string } | null;
+  }
+
+  completeTextTask(id: string, output: { responseText: string; providerRequestId: string; usageJson: string }) {
+    if (!output.responseText.trim() || output.responseText.length > 2_000_000 || !output.providerRequestId.trim()) {
+      throw new Error("Text output and provider request ID are required; response limit is 2 MB characters.");
+    }
+    JSON.parse(output.usageJson);
+    const sha256 = createHash("sha256").update(output.responseText).digest("hex");
+    return this.atomic(() => {
+      const task = this.getTask(id);
+      if (task.stage !== "text" || !task.requestStarted) throw new Error("Text task must have a persisted dispatch intent.");
+      const old = this.getTextOutput(id);
+      if (old) {
+        if (old.sha256 !== sha256 || old.providerRequestId !== output.providerRequestId || old.usageJson !== output.usageJson) {
+          throw new Error("Successful text output is immutable.");
+        }
+        return old;
+      }
+      if (task.state === "succeeded") throw new Error("Successful task has no text receipt; reconciliation required.");
+      this.db.query(`INSERT INTO text_output(task_id, response_text, response_sha256, provider_request_id, usage_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)`).run(id, output.responseText, sha256, output.providerRequestId, output.usageJson, Date.now());
+      this.db.query("UPDATE generation_task SET state = 'succeeded', updated_at = ? WHERE id = ?").run(Date.now(), id);
+      return { ...output, sha256 };
+    });
+  }
+
   completeTask(id: string, output: { slot: string; path: string; sha256: string }) {
+    if (this.getTask(id).stage === "text") throw new Error("Text tasks must persist a text response receipt.");
     if (!output.slot.trim() || !output.path.trim() || !/^[a-f0-9]{64}$/i.test(output.sha256)) {
       throw new TypeError("Output slot, path, and SHA-256 are required.");
     }

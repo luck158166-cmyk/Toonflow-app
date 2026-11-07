@@ -46,7 +46,7 @@ const workflow = computed(() => [
   { label: "故事分析与分集", stage: "episodes" as Stage, ready: !!props.project?.episodes.length },
   { label: "角色与场景", stage: "assets" as Stage, ready: !!(props.project?.assets.length || props.project?.scenes.length) },
   { label: "镜头规划", stage: "shots" as Stage, ready: !!props.project?.shots.length },
-  { label: "画面与视频生成", stage: "tasks" as Stage, ready: !!props.project?.tasks.some(task => task.outputCount > 0) },
+  { label: "画面与视频生成", stage: "tasks" as Stage, ready: !!props.project?.tasks.some(task => ["image", "video"].includes(task.stage) && task.outputCount > 0) },
   { label: "成片合成", stage: "exports" as Stage, ready: !!props.project?.tasks.some(task => task.stage === "synthesis" && task.outputCount > 0) },
 ]);
 </script>
