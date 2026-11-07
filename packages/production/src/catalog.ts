@@ -156,10 +156,22 @@ export class ProductionCatalog {
         created_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS production_shot_episode_order ON production_shot(episode_id, sequence);
+      CREATE TABLE IF NOT EXISTS adaptation_input (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES production_project(id),
+        episode_number INTEGER NOT NULL,
+        source_hash TEXT NOT NULL,
+        template_version TEXT NOT NULL,
+        request_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        UNIQUE(project_id, id)
+      );
       CREATE INDEX IF NOT EXISTS shot_prop_link_prop ON shot_prop_link(prop_id);
       CREATE INDEX IF NOT EXISTS extracted_candidate_state ON extracted_candidate(project_id, state, kind);
     `);
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (3, ?) ON CONFLICT(version) DO NOTHING`)
+      .run(Date.now());
+    db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (4, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
   }
 
@@ -284,6 +296,10 @@ export class ProductionCatalog {
         stateBefore: string; stateAfter: string; interaction: string; evidenceJson: string }>;
     return {
       chapterIndex,
+      adaptationInputs: this.db.query(`SELECT id, episode_number AS episodeNumber, source_hash AS sourceHash,
+        template_version AS templateVersion, created_at AS createdAt FROM adaptation_input
+        WHERE project_id = ? ORDER BY created_at DESC, id`).all(projectId) as Array<{
+          id: string; episodeNumber: number; sourceHash: string; templateVersion: string; createdAt: number }>,
       analysis: analysisRow ? { events: JSON.parse(analysisRow.eventsJson) as unknown[],
         relations: JSON.parse(analysisRow.relationsJson) as unknown[],
         version: analysisRow.version, updatedAt: analysisRow.updatedAt } : null,

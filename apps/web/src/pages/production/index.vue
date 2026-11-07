@@ -43,6 +43,7 @@
 
         <template v-else-if="activeStage === 'episodes'">
           <div class="sectionHeading"><div><h2>分集剧本</h2><p>每集的梗概、提纲和剧本与故事资料关联。</p></div></div>
+          <section v-if="project?.chapterIndex" class="surfaceCard"><adaptationSetup :directory="directory" :projectId="selectedStoryId" :chapterCount="project.chapterIndex.chapters.length" :nextEpisode="Math.max(0, ...project.episodes.map(item => item.episodeNumber)) + 1" :inputs="project.adaptationInputs" @changed="refreshProject" /></section>
           <section class="surfaceCard"><episodeCenter :key="project?.episodes.length" :directory="directory" :stories="stories" :selectedProjectId="selectedStoryId" @changed="refreshProject" /></section>
           <section v-if="project" class="surfaceCard"><draftImport :directory="directory" :projectId="selectedStoryId" @changed="refreshProject" /></section>
           <section v-if="project?.episodes.length" class="surfaceCard"><h3>已保存的提纲与剧本</h3><div v-for="episode in project.episodes" :key="episode.id" class="episodeDetail"><div class="cardHeading"><strong>第 {{ episode.episodeNumber }} 集 · {{ episode.title }}</strong><el-tag size="small" :type="episode.scriptReport.passed ? 'success' : 'warning'">{{ episode.scriptReport.passed ? '基础校验通过' : `${episode.scriptReport.checks.length} 项待修正` }}</el-tag></div><p>{{ episode.logline || '尚无本集梗概' }}</p><ol v-if="episode.outline.length"><li v-for="(beat, index) in episode.outline" :key="index">{{ beat }}</li></ol><p v-else class="subtleText">尚无结构化提纲</p><small>剧本场次：{{ episode.script.length }} · 预估时长 {{ episode.scriptReport.estimatedSeconds }} 秒</small><ul v-if="episode.scriptReport.checks.length" class="scriptIssues"><li v-for="(check, index) in episode.scriptReport.checks" :key="index">{{ check.scene ? `第 ${check.scene} 场：` : '' }}{{ check.message }}</li></ul></div></section>
@@ -92,6 +93,7 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import episodeCenter from "@/pages/workspace/components/episodeCenter.vue";
 import dashboard from "./dashboard.vue";
 import draftImport from "./draftImport.vue";
+import adaptationSetup from "./adaptationSetup.vue";
 
 type Stage = "overview" | "stories" | "episodes" | "assets" | "shots" | "tasks" | "exports" | "costs";
 const router = useRouter();

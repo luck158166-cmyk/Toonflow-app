@@ -1,4 +1,5 @@
 import axios from "axios";
+export type AdaptationInputSummary = { id: string; episodeNumber: number; sourceHash: string; templateVersion: string; createdAt: number };
 
 export type SourceKind = "synopsis" | "novel" | "script";
 export type Story = { id: string; title: string; sourceKind: SourceKind; workflowState: string; createdAt: number; updatedAt: number };
@@ -15,6 +16,7 @@ export type EpisodeCost = { episode: Episode; breakdown: Array<{ shotId: string 
     pricingRef: string | null; unit: string | null; units: number | null; unitPriceMicros: number | null;
     createdAt: number }> };
 export type ProjectProduction = { story: StoryDetail;
+  adaptationInputs: AdaptationInputSummary[];
   chapterIndex: { sourceHash: string; lineCount: number; chapterUnit: "章" | "回" | "节" | null;
     chapters: Array<{ sequence: number; title: string; lineStart: number; lineEnd: number;
       contentLineStart: number; characterCount: number }>;
@@ -55,6 +57,11 @@ export type BudgetOverview = { global: BudgetUsage; globalHistory: BudgetChange[
 const client = axios.create({ baseURL: "/api/production", headers: { "x-toonflow-workspace": "1" } });
 
 const productionApi = {
+  async prepareAdaptation(directory: string, projectId: string, options: { episodeNumber: number;
+    firstChapter: number; lastChapter: number; targetSeconds: number; genre: string; visualStyle: string }) {
+    const { data } = await client.post<{ data: AdaptationInputSummary }>("/prepareAdaptation", { directory, projectId, options });
+    return data.data;
+  },
   async adoptEpisodeDraft(directory: string, projectId: string, sourceHash: string, draft: unknown) {
     await client.post("/adoptEpisodeDraft", { directory, projectId, sourceHash, draft });
   },
