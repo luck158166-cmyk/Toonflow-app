@@ -51,6 +51,10 @@ const productionApi = {
       { params: { directory, projectId, episodeId } });
     return data.data;
   },
+  async exportBackup(directory: string) {
+    const { data } = await client.get<Blob>("/exportBackup", { params: { directory }, responseType: "blob" });
+    return data;
+  },
   async listPriceRules(directory: string) {
     const { data } = await client.get<{ data: { rules: PriceRule[] } }>("/listPriceRules", { params: { directory } });
     return data.data.rules;

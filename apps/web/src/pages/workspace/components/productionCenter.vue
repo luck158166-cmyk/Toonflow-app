@@ -104,6 +104,11 @@
             <el-table-column label="新上限" minWidth="160"><template #default="{ row }">{{ formatMoney(row.limitMicros, row.currency) }}</template></el-table-column>
             <el-table-column label="预警阈值" minWidth="100"><template #default="{ row }">{{ row.warningBasisPoints / 100 }}%</template></el-table-column>
           </el-table>
+          <div class="backupActions">
+            <h3>项目生产备份</h3>
+            <p>下载当前工作区文件、生产数据库一致快照及对应的任务费用记录。备份包含故事原文和素材，请妥善保管。</p>
+            <el-button :loading="exportingBackup" @click="exportBackup">导出生产备份 ZIP</el-button>
+          </div>
         </div>
       </el-tab-pane>
     </el-tabs>
@@ -115,6 +120,7 @@ import axios from "axios";
 import { ElMessage } from "element-plus";
 import { computed, ref, watch } from "vue";
 import productionApi, { type BudgetOverview, type PriceRule, type SourceKind, type Story, type StoryDetail } from "@/lib/productionApi";
+import saveFile from "@/lib/saveFile";
 import episodeCenter from "./episodeCenter.vue";
 
 const props = defineProps<{ directory: string }>();
@@ -146,6 +152,7 @@ const budgetWarningPercent = ref(90);
 const budgetOverview = ref<BudgetOverview | null>(null);
 const loadingBudget = ref(false);
 const savingBudget = ref(false);
+const exportingBackup = ref(false);
 const selectedBudget = computed(() => budgetScope.value === "global" ? budgetOverview.value?.global : budgetOverview.value?.project);
 const selectedBudgetHistory = computed(() => budgetScope.value === "global"
   ? budgetOverview.value?.globalHistory ?? [] : budgetOverview.value?.projectHistory ?? []);
@@ -309,6 +316,16 @@ async function saveBudget() {
     ElMessage.error(errorMessage(cause));
   } finally { savingBudget.value = false; }
 }
+
+async function exportBackup() {
+  const directory = props.directory;
+  if (!directory || exportingBackup.value) return;
+  exportingBackup.value = true;
+  try {
+    await saveFile(() => productionApi.exportBackup(directory), "toonflowProductionBackup.zip");
+  } catch (cause) { ElMessage.error(errorMessage(cause)); }
+  finally { exportingBackup.value = false; }
+}
 </script>
 
 <style scoped lang="scss">
@@ -335,6 +352,8 @@ async function saveBudget() {
     }
   }
 }
+
+.backupActions { margin-top: 24px; }
 @media (max-width: 680px) { .productionCenter { grid-template-columns: 1fr; } }
 .priceCenter {
   p { color: var(--el-text-color-secondary); font-size: 13px; }

@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { dirname, resolve } from "node:path";
 import { lstat, mkdir, realpath } from "@toonflow/file";
 import { ProductionCatalog, ProductionStore } from "@toonflow/production";
+export { createProjectBackup } from "./projectBackup";
 
 async function prepareDirectory(parent: string, name: string) {
   const path = resolve(parent, name);

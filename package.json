@@ -56,6 +56,7 @@
     "@toonflow/file": "workspace:*",
     "@types/bun": "^1.4.2",
     "@types/postcss-pxtorem": "^6.1.0",
+    "fflate": "^0.8.3",
     "postcss": "^8.5.28",
     "postcss-pxtorem": "^6.1.0",
     "typescript": "^7.0.2"
