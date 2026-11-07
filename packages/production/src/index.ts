@@ -5,6 +5,7 @@ export * from "./adaptationTask";
 export * from "./adaptationExecution";
 export * from "./episodeReview";
 export * from "./assetReference";
+export * from "./shotPreparation";
 export * from "./store";
 export * from "./globalBudgetCoordinator";
 export * from "./dispatcher";

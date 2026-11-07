@@ -2,7 +2,13 @@ import { createApp, h } from "../apps/web/node_modules/vue/dist/vue.esm-bundler.
 import productionApi, { type EpisodeReview } from "../apps/web/src/lib/productionApi";
 import "../apps/web/node_modules/element-plus/dist/index.css";
 import dashboard from "../apps/web/src/pages/production/dashboard.vue";
-if (new URLSearchParams(location.search).get("stage") === "references") {
+if (new URLSearchParams(location.search).get("stage") === "preparation") {
+  document.querySelector("#notice")!.textContent = "镜头资料验证 · 临时工作区真实读写 · 图片为测试像素";
+  const fixture = await (await fetch("/qa/referenceFixture")).json();
+  const { default: shotPreparationPanel } = await import("../apps/web/src/pages/production/shotPreparationPanel.vue");
+  createApp({ render: () => h(shotPreparationPanel, { ...fixture,
+    onOpenAssets: () => { document.querySelector("#notice")!.textContent = "已触发参考图库导航（QA）"; } }) }).mount("#app");
+} else if (new URLSearchParams(location.search).get("stage") === "references") {
   document.querySelector("#notice")!.textContent = "参考图库验证 · 临时工作区真实读写 · 无模型调用";
   const fixture = await (await fetch("/qa/referenceFixture")).json();
   const { default: assetReferencePanel } = await import("../apps/web/src/pages/production/assetReferencePanel.vue");

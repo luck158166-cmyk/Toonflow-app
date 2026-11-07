@@ -206,6 +206,18 @@ export class ProductionCatalog {
         created_at INTEGER NOT NULL,
         UNIQUE(project_id, entity_kind, entity_id, role, version)
       );
+      CREATE TABLE IF NOT EXISTS shot_preparation (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES production_project(id),
+        episode_id TEXT NOT NULL REFERENCES production_episode(id),
+        shot_id TEXT NOT NULL REFERENCES production_shot(id),
+        input_hash TEXT NOT NULL,
+        version INTEGER NOT NULL CHECK (version > 0),
+        snapshot_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        UNIQUE(shot_id, input_hash),
+        UNIQUE(shot_id, version)
+      );
     `);
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (3, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
@@ -216,6 +228,8 @@ export class ProductionCatalog {
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (6, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
     db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (7, ?) ON CONFLICT(version) DO NOTHING`)
+      .run(Date.now());
+    db.query(`INSERT INTO schema_migration(version, applied_at) VALUES (8, ?) ON CONFLICT(version) DO NOTHING`)
       .run(Date.now());
   }
 

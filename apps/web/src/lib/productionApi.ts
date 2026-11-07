@@ -12,6 +12,15 @@ export type AssetReference = { id: string; projectId: string; entityKind: "asset
   sourceKind: "user_authorized"; createdAt: number };
 export type ReferenceTarget = { entityKind: "asset" | "scene"; entityId: string; name: string; kind: string;
   description: string; locked: boolean; entityHash: string; roles: ReferenceRole[] };
+export type ShotPreparation = { inputHash: string; issues: Array<{ code: string; message: string; entityId?: string }>;
+  history: Array<{ id: string; version: number; inputHash: string; createdAt: number }>;
+  snapshot: { shot: { id: string; sequence: number; title: string; scriptExcerpt: string; durationMs: number; shotSize: string; movement: string; promptText: string };
+    references: Array<{ index: number; entityId: string; name: string; role: ReferenceRole; description: string; reference: AssetReference | null }>;
+    characters: Array<{ id: string; name: string; costumeId: string | null }>;
+    dialogue: Array<{ id: string; speakerId: string | null; speakerName: string | null; kind: string; text: string; emotion: string }>;
+    dialogueTiming: { charactersPerSecond: number; estimatedSeconds: number };
+    props: Array<{ propId: string; propName: string; holderBeforeName: string | null; holderAfterName: string | null; stateBefore: string; stateAfter: string; interaction: string }>;
+    continuity: { previousShot: { title: string; scriptExcerpt: string } | null; nextShot: { title: string; scriptExcerpt: string } | null } } };
 
 export type SourceKind = "synopsis" | "novel" | "script";
 export type Story = { id: string; title: string; sourceKind: SourceKind; workflowState: string; createdAt: number; updatedAt: number };
@@ -79,6 +88,14 @@ export type BudgetOverview = { global: BudgetUsage; globalHistory: BudgetChange[
 const client = axios.create({ baseURL: "/api/production", headers: { "x-toonflow-workspace": "1" } });
 
 const productionApi = {
+  async getShotPreparation(directory: string, projectId: string, shotId: string) {
+    const { data } = await client.get<{ data: ShotPreparation }>("/getShotPreparation", { params: { directory, projectId, shotId } });
+    return data.data;
+  },
+  async saveShotPreparation(directory: string, projectId: string, shotId: string, inputHash: string) {
+    const { data } = await client.post<{ data: { id: string; version: number; inputHash: string; created: boolean } }>("/saveShotPreparation", { directory, projectId, shotId, inputHash });
+    return data.data;
+  },
   async getAssetReferences(directory: string, projectId: string) {
     const { data } = await client.get<{ data: { targets: ReferenceTarget[]; references: AssetReference[] } }>("/getAssetReferences", { params: { directory, projectId } });
     return data.data;

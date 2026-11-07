@@ -57,6 +57,7 @@
         </template>
 
         <template v-else-if="activeStage === 'shots'">
+          <section v-if="project" class="surfaceCard"><shotPreparationPanel :directory="directory" :projectId="selectedStoryId" :shots="project.shots" @openAssets="activeStage = 'assets'" /></section>
           <div class="sectionHeading"><div><h2>镜头与片段</h2><p>内容确认、运行任务和视频准备度分别显示，避免把“已写好”误认成“已生成”。</p></div><el-button :disabled="!selectedStoryId" @click="refreshProject">刷新镜头</el-button></div>
           <section class="surfaceCard"><el-table :data="project?.shots ?? []" maxHeight="calc(100vh - 245px)" emptyText="当前故事尚无分镜"><el-table-column label="镜头" width="100"><template #default="{ row }">{{ row.episodeNumber }}-{{ row.sequence }}</template></el-table-column><el-table-column prop="title" label="标题" minWidth="130" /><el-table-column prop="scriptExcerpt" label="剧本依据" minWidth="200" showOverflowTooltip /><el-table-column label="道具状态" minWidth="220" showOverflowTooltip><template #default="{ row }">{{ propSummary(row.id) }}</template></el-table-column><el-table-column label="时长" width="90"><template #default="{ row }">{{ (row.durationMs / 1000).toFixed(1) }} 秒</template></el-table-column><el-table-column prop="reviewState" label="内容确认" width="110" /><el-table-column prop="runtimeState" label="运行状态" width="110" /><el-table-column prop="videoReadiness" label="视频准备" width="110" /><el-table-column prop="promptText" label="提示词" minWidth="220" showOverflowTooltip /></el-table></section>
         </template>
@@ -99,6 +100,7 @@ import adaptationSetup from "./adaptationSetup.vue";
 import episodeReviewPanel from "./episodeReviewPanel.vue";
 import assetReferencePanel from "./assetReferencePanel.vue";
 import studioSettings from "./studioSettings.vue";
+import shotPreparationPanel from "./shotPreparationPanel.vue";
 
 type Stage = "overview" | "stories" | "episodes" | "assets" | "shots" | "tasks" | "exports" | "costs";
 const router = useRouter();

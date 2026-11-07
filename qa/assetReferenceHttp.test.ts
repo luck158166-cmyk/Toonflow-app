@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { unzipSync } from "fflate";
 import express from "../apps/server/node_modules/express";
 import { listAssetReferences } from "../packages/production/src/assetReference";
+import { createShotFixture, bindFixtureImages } from "./shotPreparationFixture";
 
 it("binds and reads preserved image bytes through actual local routes, rejects tampering, and backs up references", async () => {
   const root = mkdtempSync(join(tmpdir(), "assetReferenceHttp"));
@@ -27,6 +28,8 @@ it("binds and reads preserved image bytes through actual local routes, rejects t
     const { default: readRoute } = await import("../apps/server/src/routes/production/readAssetReference");
     const app = express(); app.use(express.json());
     app.use("/list", listRoute); app.use("/bind", bindRoute); app.use("/read", readRoute);
+    app.use("/preparation", (await import("../apps/server/src/routes/production/getShotPreparation")).default);
+    app.use("/savePreparation", (await import("../apps/server/src/routes/production/saveShotPreparation")).default);
     app.use((error: Error & { status?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => res.status(error.status ?? 500).json({ message: error.message }));
     server = app.listen(0, "127.0.0.1"); await new Promise<void>(resolve => server!.once("listening", resolve));
     const address = server.address(); if (!address || typeof address === "string") throw new Error("Missing port");
@@ -65,14 +68,40 @@ it("binds and reads preserved image bytes through actual local routes, rejects t
     for (const response of simultaneousReads) expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
     readQuery.set("projectId", crypto.randomUUID());
     expect((await fetch(base + "/read?" + readQuery, { headers })).status).toBe(404);
+    const fixture = await u.production.withProduction(workspace, catalog => {
+      const fixture = createShotFixture(catalog); bindFixtureImages(catalog, fixture.projectId, first); return fixture;
+    });
+    const preparationQuery = new URLSearchParams({ directory: workspace, projectId: fixture.projectId, shotId: fixture.shotIds[0]! });
+    const preparedResponse = await fetch(base + "/preparation?" + preparationQuery, { headers });
+    expect(preparedResponse.status).toBe(200);
+    const prepared = (await preparedResponse.json()).data;
+    expect(prepared.issues).toEqual([]); expect(prepared.snapshot.references).toHaveLength(6);
+    const saveInput = { directory: workspace, projectId: fixture.projectId, shotId: fixture.shotIds[0], inputHash: prepared.inputHash };
+    const save = (input = saveInput, origin = base) => fetch(base + "/savePreparation", {
+      method: "POST", headers: { ...headers, origin }, body: JSON.stringify(input) });
+    expect((await save(saveInput, "https://untrusted.example.test")).status).toBe(403);
+    expect((await save({ ...saveInput, projectId })).status).toBe(409);
+    expect((await save({ ...saveInput, inputHash: "a".repeat(64) })).status).toBe(409);
+    const savedResponse = await save(); expect(savedResponse.status).toBe(200);
+    const saved = (await savedResponse.json()).data;
+    expect(saved.version).toBe(1);
+    expect((await (await save()).json()).data).toEqual({ ...saved, created: false });
+    expect(await u.production.withProduction(workspace, (_catalog, store) => store.listProjectTasks(fixture.projectId))).toEqual([]);
     const archive = unzipSync(await u.production.createProjectBackup(workspace, root));
     expect(archive["workspace/" + first.path]).toEqual(new Uint8Array(bytes));
     const snapshot = new Database(archive["workspace/.production/production.db"]!);
-    try { expect(snapshot.query("SELECT sha256 FROM asset_reference WHERE id = ?").get(first.id)).toEqual({ sha256 }); }
+    try {
+      expect(snapshot.query("SELECT sha256 FROM asset_reference WHERE id = ?").get(first.id)).toEqual({ sha256 });
+      const manifest = snapshot.query("SELECT snapshot_json AS content FROM shot_preparation WHERE id = ?").get(saved.id) as { content: string };
+      expect(JSON.parse(manifest.content)).toEqual(prepared.snapshot);
+    }
     finally { snapshot.close(); }
     writeFileSync(join(workspace, first.path), "tampered preserved file");
     readQuery.set("projectId", projectId);
     expect((await fetch(base + "/read?" + readQuery, { headers })).status).toBe(409);
+    const broken = (await (await fetch(base + "/preparation?" + preparationQuery, { headers })).json()).data;
+    expect(broken.issues.some((item: { code: string }) => item.code === "referenceBytes")).toBe(true);
+    expect((await save()).status).toBe(409);
     writeFileSync(join(workspace, "input.png"), bytes);
     expect((await post(input)).status).toBe(409);
     const references = await u.production.withProduction(workspace, catalog => listAssetReferences(catalog, projectId));
