@@ -55,6 +55,9 @@ export type BudgetOverview = { global: BudgetUsage; globalHistory: BudgetChange[
 const client = axios.create({ baseURL: "/api/production", headers: { "x-toonflow-workspace": "1" } });
 
 const productionApi = {
+  async adoptEpisodeDraft(directory: string, projectId: string, sourceHash: string, draft: unknown) {
+    await client.post("/adoptEpisodeDraft", { directory, projectId, sourceHash, draft });
+  },
   async listStorySummaries(directory: string) {
     const { data } = await client.get<{ data: { stories: StorySummary[] } }>("/listStorySummaries", { params: { directory } });
     return data.data.stories;
