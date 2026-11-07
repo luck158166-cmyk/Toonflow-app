@@ -5,7 +5,7 @@
       <div class="projectBlock"><span>当前工作区</span><strong :title="directory">{{ workspaceStore.project?.name }}</strong></div>
       <nav class="stageNav" aria-label="生产流程">
         <button v-for="item in navigation" :key="item.key" type="button" :class="{ active: activeStage === item.key }" @click="activeStage = item.key">
-          <span class="stageNumber">{{ item.number }}</span><span>{{ item.label }}</span><span v-if="item.count !== undefined" class="stageCount">{{ item.count }}</span>
+          <component :is="item.icon" :size="17" aria-hidden="true" /><span>{{ item.label }}</span><span v-if="item.count !== undefined" class="stageCount">{{ item.count }}</span>
         </button>
       </nav>
       <div class="railFooter">
@@ -19,14 +19,7 @@
         <div class="topActions"><span class="safeState">真实模型调用未授权</span><el-button class="mobileLink" text @click="router.push('/workspace')">画布</el-button><el-button class="mobileLink" text @click="router.push('/home')">项目</el-button><el-button :loading="loading" @click="refresh">刷新资料</el-button></div>
       </header>
       <div class="pageBody" v-loading="loading">
-        <template v-if="activeStage === 'overview'">
-          <div class="heroCard"><div><span class="eyebrow">从故事到成片</span><h2>在一个工作台管理整部短剧</h2><p>导入故事，建立分集与资产，逐镜检查生产状态。付费生成需单独确认内容、次数与预算。</p></div><el-button type="primary" @click="activeStage = 'stories'">开始整理故事</el-button></div>
-          <div class="metricGrid">
-            <article v-for="metric in metrics" :key="metric.label" class="metricCard"><span>{{ metric.label }}</span><strong>{{ metric.value }}</strong><small>{{ metric.note }}</small></article>
-          </div>
-          <div class="sectionHeading"><h2>生产流程</h2><span>当前资料来自本地生产库</span></div>
-          <div class="flowGrid"><button v-for="step in flow" :key="step.key" type="button" class="flowCard" @click="activeStage = step.key"><span>{{ step.number }}</span><strong>{{ step.label }}</strong><small>{{ step.description }}</small></button></div>
-        </template>
+        <dashboard v-if="activeStage === 'overview'" :project="project" :storyCount="stories.length" :budget="budget" @openStage="activeStage = $event" />
 
         <template v-else-if="activeStage === 'stories'">
           <div class="sectionHeading"><div><h2>故事资料</h2><p>原文保留在当前工作区，后续分析以它为依据。</p></div><el-button @click="loadStories">刷新故事</el-button></div>
@@ -84,10 +77,12 @@ import axios from "axios";
 import { ElMessage } from "element-plus";
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import { IconBook2, IconBox, IconChartBar, IconChecklist, IconClipboardText, IconHome, IconMovie, IconPhotoVideo } from "@tabler/icons-vue";
 import saveFile from "@/lib/saveFile";
 import productionApi, { type BudgetOverview, type PriceRule, type ProjectProduction, type SourceKind, type Story } from "@/lib/productionApi";
 import { useWorkspaceStore } from "@/stores/workspace";
 import episodeCenter from "@/pages/workspace/components/episodeCenter.vue";
+import dashboard from "./dashboard.vue";
 
 type Stage = "overview" | "stories" | "episodes" | "assets" | "shots" | "tasks" | "exports" | "costs";
 const router = useRouter();
@@ -125,30 +120,16 @@ const priceSourceUrl = ref("");
 const stageLabels: Record<Stage, string> = { overview: "项目总览", stories: "故事资料", episodes: "分集剧本", assets: "人物与场景", shots: "镜头与片段", tasks: "生成任务", exports: "成片管理", costs: "费用与备份" };
 const stageTitle = computed(() => stageLabels[activeStage.value]);
 const navigation = computed(() => ([
-  { key: "overview", number: "01", label: "项目总览" },
-  { key: "stories", number: "02", label: "故事资料", count: stories.value.length },
-  { key: "episodes", number: "03", label: "分集剧本", count: project.value?.episodes.length },
-  { key: "assets", number: "04", label: "人物与场景", count: (project.value?.assets.length ?? 0) + (project.value?.scenes.length ?? 0) },
-  { key: "shots", number: "05", label: "镜头与片段", count: project.value?.shots.length },
-  { key: "tasks", number: "06", label: "生成任务", count: project.value?.tasks.length },
-  { key: "exports", number: "07", label: "成片管理", count: synthesisTasks.value.length },
-  { key: "costs", number: "08", label: "费用与备份" },
-] as Array<{ key: Stage; number: string; label: string; count?: number }>));
+  { key: "overview", label: "项目总览", icon: IconHome },
+  { key: "stories", label: "故事资料", icon: IconBook2, count: stories.value.length },
+  { key: "episodes", label: "分集剧本", icon: IconClipboardText, count: project.value?.episodes.length },
+  { key: "assets", label: "人物与场景", icon: IconBox, count: (project.value?.assets.length ?? 0) + (project.value?.scenes.length ?? 0) },
+  { key: "shots", label: "镜头与片段", icon: IconPhotoVideo, count: project.value?.shots.length },
+  { key: "tasks", label: "生成任务", icon: IconChecklist, count: project.value?.tasks.length },
+  { key: "exports", label: "成片管理", icon: IconMovie, count: synthesisTasks.value.length },
+  { key: "costs", label: "费用与备份", icon: IconChartBar },
+] as Array<{ key: Stage; label: string; icon: typeof IconHome; count?: number }>));
 const synthesisTasks = computed(() => project.value?.tasks.filter(task => task.stage === "synthesis") ?? []);
-const metrics = computed(() => [
-  { label: "故事", value: stories.value.length, note: "已导入原文" },
-  { label: "分集", value: project.value?.episodes.length ?? 0, note: "当前故事" },
-  { label: "人物与场景", value: (project.value?.assets.length ?? 0) + (project.value?.scenes.length ?? 0), note: "可复用资产" },
-  { label: "镜头", value: project.value?.shots.length ?? 0, note: "当前故事" },
-]);
-const flow: Array<{ key: Stage; number: string; label: string; description: string }> = [
-  { key: "stories", number: "01", label: "故事与分析", description: "原文、事件与人物关系" },
-  { key: "episodes", number: "02", label: "分集剧本", description: "集数、提纲与场次" },
-  { key: "assets", number: "03", label: "资产库", description: "人物、服装、道具、场景" },
-  { key: "shots", number: "04", label: "镜头规划", description: "证据、提示词与就绪度" },
-  { key: "tasks", number: "05", label: "生成与恢复", description: "任务、产物与对账" },
-  { key: "exports", number: "06", label: "成片与质检", description: "字幕、配乐与 MP4" },
-];
 
 watch(directory, () => { stories.value = []; selectedStoryId.value = ""; project.value = null; void loadStories(); }, { immediate: true });
 watch(selectedStoryId, () => { project.value = null; void refreshProject(); void loadBudget(); });
@@ -271,18 +252,18 @@ async function exportBackup() {
 </script>
 
 <style scoped lang="scss">
-.productionPage { display: grid; grid-template-columns: 244px minmax(0, 1fr); width: 100%; height: 100dvh; color: var(--el-text-color-primary); background: var(--el-bg-color-page); }
+.productionPage { --el-bg-color-page: #081321; --el-bg-color-overlay: #122037; --el-border-color-light: #31445e; --el-text-color-primary: #e8eef7; --el-text-color-secondary: #9cacc0; --el-text-color-regular: #c9d6e5; --el-color-primary: #c8ac78; --el-color-primary-light-9: #1c3045; --el-color-primary-light-7: #38536c; --el-fill-color-light: #192b40; display: grid; grid-template-columns: 222px minmax(0, 1fr); width: 100%; height: 100dvh; color: var(--el-text-color-primary); background: var(--el-bg-color-page); }
 .sideRail { display: flex; flex-direction: column; min-width: 0; padding: 26px 16px 18px; border-right: 1px solid var(--el-border-color-light); background: var(--el-bg-color-overlay);
   .brandBlock { display: flex; align-items: center; gap: 10px; padding: 0 10px 26px; strong, small { display: block; } strong { font-size: 15px; } small { margin-top: 3px; color: var(--el-text-color-secondary); font-size: 11px; letter-spacing: .08em; } }
   .brandMark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--el-color-primary); color: white; font-weight: 700; }
   .projectBlock { display: grid; gap: 5px; padding: 12px 14px; border: 1px solid var(--el-border-color-light); border-radius: 10px; span { color: var(--el-text-color-secondary); font-size: 11px; } strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; } }
-  .stageNav { display: grid; gap: 3px; margin-top: 24px; button { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 43px; padding: 0 12px; border: 0; border-radius: 9px; color: var(--el-text-color-regular); background: transparent; text-align: left; cursor: pointer; &.active { color: var(--el-color-primary); background: var(--el-color-primary-light-9); font-weight: 600; } &:hover { background: var(--el-fill-color-light); } } .stageNumber { width: 18px; color: var(--el-text-color-placeholder); font-size: 11px; } .stageCount { margin-left: auto; color: var(--el-text-color-secondary); font-size: 11px; } }
+  .stageNav { display: grid; gap: 3px; margin-top: 24px; button { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 43px; padding: 0 12px; border: 0; border-radius: 9px; color: var(--el-text-color-regular); background: transparent; text-align: left; cursor: pointer; &.active { color: var(--el-color-primary); background: var(--el-color-primary-light-9); font-weight: 600; } &:hover { background: var(--el-fill-color-light); } } .stageCount { margin-left: auto; color: var(--el-text-color-secondary); font-size: 11px; } }
   .railFooter { display: grid; gap: 4px; margin-top: auto; padding-top: 16px; border-top: 1px solid var(--el-border-color-light); .el-button { justify-content: flex-start; margin: 0; } }
 }
 .mainArea { min-width: 0; overflow: hidden; }
-.topBar { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 104px; padding: 20px 36px; border-bottom: 1px solid var(--el-border-color-light); background: var(--el-bg-color-overlay); h1 { margin: 5px 0 0; font-size: 24px; } .topActions { display: flex; align-items: center; gap: 14px; } .safeState { color: var(--el-color-warning); font-size: 12px; } .mobileLink { display: none; } }
+.topBar { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 92px; padding: 18px 28px; border-bottom: 1px solid var(--el-border-color-light); background: var(--el-bg-color-overlay); h1 { margin: 5px 0 0; font-size: 22px; } .topActions { display: flex; align-items: center; gap: 14px; } .safeState { color: #d4b77c; font-size: 12px; } .mobileLink { display: none; } }
 .eyebrow { color: var(--el-color-primary); font-size: 10px; font-weight: 700; letter-spacing: .16em; }
-.pageBody { height: calc(100dvh - 104px); overflow: auto; padding: 30px 36px 54px; }
+.pageBody { height: calc(100dvh - 92px); overflow: auto; padding: 22px 28px 48px; }
 .heroCard { display: flex; align-items: end; justify-content: space-between; gap: 20px; min-height: 205px; padding: 28px 32px; border-radius: 16px; background: linear-gradient(120deg, var(--el-color-primary-light-9), var(--el-bg-color-overlay) 70%); border: 1px solid var(--el-color-primary-light-7); h2 { margin: 9px 0 10px; font-size: 26px; } p { max-width: 650px; color: var(--el-text-color-secondary); line-height: 1.7; } }
 .metricGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 20px 0 30px; }
 .metricCard { display: grid; gap: 8px; min-height: 108px; padding: 18px 20px; border: 1px solid var(--el-border-color-light); border-radius: 12px; background: var(--el-bg-color-overlay); span, small { color: var(--el-text-color-secondary); font-size: 12px; } strong { font-size: 24px; font-weight: 650; overflow-wrap: anywhere; } }

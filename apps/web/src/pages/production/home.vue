@@ -14,7 +14,9 @@
       <div class="homeContent">
         <section class="welcomeCard"><div><span class="eyebrow">从故事出发</span><h2>把一部故事，组织成完整短剧</h2><p>在生产工作台管理原文、分集、角色、镜头、任务与费用。画布保留给需要手动精修的镜头。</p><div class="welcomeActions"><el-button type="primary" size="large" :loading="opening" @click="chooseProject">新建或打开项目</el-button><el-button size="large" :disabled="!recentProjects.length || opening" @click="openProject(recentProjects[0]!)">继续最近项目</el-button></div></div><div class="welcomeArt" aria-hidden="true"><div class="filmFrame"><span>01</span><div class="horizon" /><div class="subject" /></div><div class="filmFrame second"><span>02</span><div class="horizon" /><div class="subject" /></div><div class="filmFrame third"><span>03</span><div class="horizon" /><div class="subject" /></div></div></section>
         <div class="sectionHeading"><div><h2>本地项目</h2><p>选择一个项目进入生产工作台</p></div><span>{{ recentProjects.length }} 个项目</span></div>
-        <div v-if="recentProjects.length" class="projectGrid"><button v-for="item in recentProjects" :key="item.directory" class="projectCard" type="button" :disabled="opening" @click="openProject(item)"><span class="projectIcon">{{ item.name.slice(0, 1) || '剧' }}</span><strong>{{ item.name }}</strong><small :title="item.directory">{{ item.directory }}</small><span class="projectFooter">最近打开 {{ new Date(item.lastOpenedAt).toLocaleDateString() }}<b>进入工作台 →</b></span></button></div>
+        <div v-if="recentProjects.length" class="projectControls"><el-input v-model="searchTerm" clearable aria-label="搜索项目" placeholder="搜索项目名称或路径" /><el-select v-model="projectSort" aria-label="项目排序"><el-option label="最近打开" value="recent" /><el-option label="名称排序" value="name" /></el-select></div>
+        <div v-if="displayProjects.length" class="projectGrid"><button v-for="item in displayProjects" :key="item.directory" class="projectCard" type="button" :disabled="opening" @click="openProject(item)"><span class="projectIcon">{{ item.name.slice(0, 1) || '剧' }}</span><strong>{{ item.name }}</strong><small :title="item.directory">{{ item.directory }}</small><span class="projectFooter">最近打开 {{ new Date(item.lastOpenedAt).toLocaleDateString() }}<b>进入工作台 →</b></span></button></div>
+        <div v-else-if="recentProjects.length" class="emptyProjects">没有匹配的项目</div>
         <div v-else class="emptyProjects"><strong>还没有短剧项目</strong><p>选择一个空文件夹建立项目，或选择已有 Toonflow 工作区继续。</p><el-button @click="chooseProject">选择项目目录</el-button></div>
         <section class="workflowStrip"><div><span>01</span><strong>导入故事</strong></div><div><span>02</span><strong>分集与资产</strong></div><div><span>03</span><strong>镜头与任务</strong></div><div><span>04</span><strong>成片与费用</strong></div></section>
       </div>
@@ -36,7 +38,14 @@ const router = useRouter();
 const workspaceStore = useWorkspaceStore();
 const projectPicker = ref<InstanceType<typeof workspacePicker>>();
 const opening = ref(false);
+const searchTerm = ref("");
+const projectSort = ref<"recent" | "name">("recent");
 const recentProjects = computed(() => [...workspaceStore.projectList].sort((a, b) => b.lastOpenedAt - a.lastOpenedAt));
+const displayProjects = computed(() => {
+  const query = searchTerm.value.trim().toLocaleLowerCase();
+  const filtered = recentProjects.value.filter(item => !query || `${item.name} ${item.directory}`.toLocaleLowerCase().includes(query));
+  return projectSort.value === "name" ? filtered.sort((a, b) => a.name.localeCompare(b.name, "zh-CN", { numeric: true })) : filtered;
+});
 
 async function chooseProject() {
   if (opening.value) return;
@@ -69,7 +78,7 @@ function showError(cause: unknown) {
 </script>
 
 <style scoped lang="scss">
-.studioHome { display: grid; grid-template-columns: 238px minmax(0, 1fr); width: 100%; height: 100dvh; overflow: hidden; color: var(--el-text-color-primary); background: var(--el-bg-color-page); }
+.studioHome { --el-bg-color-page: #081321; --el-bg-color-overlay: #122037; --el-border-color-light: #31445e; --el-text-color-primary: #e8eef7; --el-text-color-secondary: #9cacc0; --el-text-color-regular: #c9d6e5; --el-color-primary: #c8ac78; --el-color-primary-light-9: #1c3045; --el-color-primary-light-7: #38536c; --el-fill-color-light: #192b40; display: grid; grid-template-columns: 222px minmax(0, 1fr); width: 100%; height: 100dvh; overflow: hidden; color: var(--el-text-color-primary); background: var(--el-bg-color-page); }
 .homeRail { display: flex; flex-direction: column; padding: 27px 16px 20px; border-right: 1px solid var(--el-border-color-light); background: var(--el-bg-color-overlay); }
 .brand { display: flex; align-items: center; gap: 11px; margin: 0 10px 42px; strong, small { display: block; } strong { font-size: 15px; } small { margin-top: 4px; color: var(--el-text-color-secondary); font-size: 11px; letter-spacing: .08em; } }
 .brandMark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--el-color-primary); color: white; font-weight: 700; }
@@ -84,6 +93,7 @@ function showError(cause: unknown) {
 .welcomeActions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; .el-button { margin: 0; } }
 .welcomeArt { position: relative; min-height: 245px; transform: rotate(-9deg); .filmFrame { position: absolute; top: 40px; right: 105px; width: 175px; height: 220px; overflow: hidden; border: 7px solid var(--el-bg-color-overlay); border-radius: 14px; box-shadow: 0 15px 35px #0003; background: linear-gradient(150deg, #23466e, #7d89ad 57%, #d5a28f); span { position: absolute; z-index: 1; top: 12px; left: 12px; color: white; font-size: 11px; } &.second { right: 55px; top: 58px; transform: rotate(10deg); background: linear-gradient(160deg, #1d3855, #b5938d 58%, #e8c0a1); } &.third { right: 8px; top: 75px; transform: rotate(19deg); background: linear-gradient(160deg, #233f63, #7e84a2 58%, #bc816b); } .horizon { position: absolute; right: 0; bottom: 55px; left: 0; height: 2px; background: #ffffff90; } .subject { position: absolute; right: 46px; bottom: 0; width: 70px; height: 112px; border-radius: 40px 40px 0 0; background: #18283aaa; } } }
 .sectionHeading { display: flex; align-items: end; justify-content: space-between; margin: 38px 0 18px; h2 { margin: 0 0 5px; font-size: 19px; } p, span { margin: 0; color: var(--el-text-color-secondary); font-size: 12px; } }
+.projectControls { display: flex; gap: 10px; max-width: 560px; margin: 0 0 16px; .el-select { flex: 0 0 140px; } }
 .projectGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .projectCard { display: grid; justify-items: start; gap: 12px; min-width: 0; min-height: 195px; padding: 21px; border: 1px solid var(--el-border-color-light); border-radius: 13px; color: inherit; background: var(--el-bg-color-overlay); text-align: left; cursor: pointer; &:hover { border-color: var(--el-color-primary); } &:disabled { opacity: .6; cursor: wait; } strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; } small { max-width: 100%; overflow: hidden; color: var(--el-text-color-secondary); text-overflow: ellipsis; white-space: nowrap; } }
 .projectIcon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 11px; background: var(--el-color-primary-light-9); color: var(--el-color-primary); font-weight: 700; }
@@ -91,5 +101,5 @@ function showError(cause: unknown) {
 .emptyProjects { padding: 45px 20px; border: 1px dashed var(--el-border-color); border-radius: 13px; text-align: center; p { color: var(--el-text-color-secondary); } }
 .workflowStrip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 34px; div { display: flex; align-items: center; gap: 9px; padding: 14px; border-radius: 10px; background: var(--el-fill-color-light); font-size: 12px; span { color: var(--el-color-primary); font-weight: 700; } } }
 @media (max-width: 1100px) { .projectGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .homeContent { padding: 26px; } }
-@media (max-width: 760px) { .studioHome { display: block; overflow: auto; } .homeRail { padding: 12px 16px; .brand, .railNote { display: none; } nav { display: flex; gap: 5px; overflow-x: auto; button { width: auto; min-width: max-content; } } } .homeMain { overflow: visible; } .homeHeader { min-height: 85px; padding: 16px; h1 { font-size: 21px; } } .homeContent { padding: 18px 16px 40px; } .welcomeCard { display: block; .welcomeArt { display: none; } > div:first-child { padding: 24px; } } .projectGrid { grid-template-columns: 1fr; } .workflowStrip { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 760px) { .studioHome { display: block; overflow: auto; } .homeRail { padding: 12px 16px; .brand, .railNote { display: none; } nav { display: flex; gap: 5px; overflow-x: auto; button { width: auto; min-width: max-content; } } } .homeMain { overflow: visible; } .homeHeader { min-height: 85px; padding: 16px; h1 { font-size: 21px; } } .homeContent { padding: 18px 16px 40px; } .welcomeCard { display: block; .welcomeArt { display: none; } > div:first-child { padding: 24px; } } .projectGrid { grid-template-columns: 1fr; } .projectControls { .el-select { flex-basis: 120px; } } .workflowStrip { grid-template-columns: repeat(2, 1fr); } }
 </style>
