@@ -3,15 +3,15 @@
     <aside class="homeRail">
       <div class="brand"><span class="brandMark">映</span><div><strong>Toonflow Studio</strong><small>AI 短剧生产</small></div></div>
       <nav aria-label="主导航">
-        <button class="active" type="button">项目列表</button>
-        <button type="button" :disabled="!workspaceStore.project" @click="openProject(workspaceStore.project!)">继续制作</button>
-        <button type="button" @click="router.push('/classic-home')">画布创作</button>
+        <button class="active" type="button"><icon-layout-grid :size="18" />项目列表</button>
+        <button type="button" :disabled="!workspaceStore.project" @click="openProject(workspaceStore.project!)"><icon-movie :size="18" />制作工作台</button>
+        <button type="button" @click="router.push('/classic-home')"><icon-brush :size="18" />画布创作</button>
       </nav>
       <p class="railNote">本地工作区 · 生产资料保存在你的电脑上</p>
     </aside>
     <section class="homeMain">
       <header class="homeHeader">
-        <div><span class="eyebrow">TOONFLOW STUDIO</span><h1>项目列表</h1><p>选择故事继续制作，或建立新项目导入小说章节。</p></div>
+        <div><span class="eyebrow">TOONFLOW STUDIO</span><h1>我的短剧</h1><p>从章节到成片，在一个工作台里完成创作。</p></div>
         <el-button type="primary" :loading="opening" @click="chooseProject">＋ 新建项目</el-button>
       </header>
       <div class="homeContent">
@@ -59,6 +59,7 @@
 <script setup lang="ts">
 import axios from "axios";
 import { ElMessage } from "element-plus";
+import { IconBrush, IconLayoutGrid, IconMovie } from "@tabler/icons-vue";
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
@@ -152,7 +153,7 @@ function showError(cause: unknown) {
 
 <style scoped lang="scss">
 .studioHome { --el-bg-color-page: #f4f7fb; --el-bg-color: #fff; --el-bg-color-overlay: #fff; --el-fill-color-blank: #fff; --el-input-bg-color: #fff; --el-border-color: #d9e4ef; --el-border-color-light: #e3ebf4; --el-text-color-primary: #1d2d42; --el-text-color-secondary: #697b8f; --el-text-color-regular: #3c5067; --el-color-primary: #1689ec; --el-fill-color-light: #f2f7fc; display: grid; grid-template-columns: 222px minmax(0, 1fr); width: 100%; height: 100dvh; overflow: hidden; color: #1d2d42; background: #f4f7fb; }
-.homeRail { display: flex; flex-direction: column; padding: 27px 16px 20px; border-right: 1px solid #e3ebf4; background: #fff; .brand { display: flex; align-items: center; gap: 11px; margin: 0 10px 42px; strong, small { display: block; } strong { font-size: 15px; } small { margin-top: 4px; color: #697b8f; font-size: 11px; } } nav { display: grid; gap: 5px; button { width: 100%; padding: 12px 14px; border: 0; border-radius: 9px; color: #3c5067; background: transparent; text-align: left; cursor: pointer; &.active { color: #0873c9; background: #e5f3ff; font-weight: 700; } &:hover:not(:disabled) { background: #f2f7fc; } &:disabled { opacity: .5; cursor: default; } } } .railNote { margin: auto 12px 0; color: #697b8f; font-size: 11px; line-height: 1.6; } }
+.homeRail { display: flex; flex-direction: column; padding: 27px 16px 20px; border-right: 1px solid #e3ebf4; background: #fff; .brand { display: flex; align-items: center; gap: 11px; margin: 0 10px 42px; strong, small { display: block; } strong { font-size: 15px; } small { margin-top: 4px; color: #697b8f; font-size: 11px; } } nav { display: grid; gap: 5px; button { display: flex; align-items: center; gap: 11px; width: 100%; padding: 12px 14px; border: 0; border-radius: 9px; color: #3c5067; background: transparent; text-align: left; cursor: pointer; &.active { color: #0873c9; background: #e5f3ff; font-weight: 700; } &:hover:not(:disabled) { background: #f2f7fc; } &:disabled { opacity: .5; cursor: default; } } } .railNote { margin: auto 12px 0; color: #697b8f; font-size: 11px; line-height: 1.6; } }
 .brandMark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; color: #fff; background: linear-gradient(135deg, #29b4ef, #627bfa); box-shadow: 0 5px 13px #1788ed38; font-weight: 700; }
 .homeMain { min-width: 0; overflow: auto; }
 .homeHeader { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 93px; padding: 18px 30px; border-bottom: 1px solid #e3ebf4; background: #fff; h1 { margin: 3px 0; font-size: 24px; } p { margin: 0; color: #697b8f; font-size: 12px; } .el-button--primary { padding-inline: 22px; } }
