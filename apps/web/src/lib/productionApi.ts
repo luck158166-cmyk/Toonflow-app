@@ -3,6 +3,14 @@ import axios from "axios";
 export type SourceKind = "synopsis" | "novel" | "script";
 export type Story = { id: string; title: string; sourceKind: SourceKind; workflowState: string; createdAt: number; updatedAt: number };
 export type StoryDetail = Story & { sourceText: string };
+export type Episode = { id: string; projectId: string; episodeNumber: number; title: string; logline: string;
+  reviewState: string; createdAt: number; updatedAt: number; shotCount?: number };
+export type EpisodeCost = { episode: Episode; breakdown: Array<{ shotId: string | null; stage: string;
+  provider: string; modelId: string; currency: string; chargedMicros: number; reservedMicros: number }>;
+  charges: Array<{ taskId: string; shotId: string | null; stage: string; provider: string; modelId: string;
+    sourceRef: string; amountMicros: number; currency: string; status: "reconciled" | "manual";
+    pricingRef: string | null; unit: string | null; units: number | null; unitPriceMicros: number | null;
+    createdAt: number }> };
 export type PriceRule = { id: string; provider: string; modelId: string; unit: string; unitSize: number;
   unitPriceMicros: number; currency: string; sourceUrl: string; effectiveAt: number; recordedBy: string; createdAt: number };
 export type PriceRuleInput = Pick<PriceRule, "provider" | "modelId" | "unit" | "unitSize" | "unitPriceMicros" | "currency" | "sourceUrl" | "effectiveAt">;
@@ -28,6 +36,20 @@ const productionApi = {
   async importStory(directory: string, title: string, sourceKind: SourceKind, sourceText: string) {
     const { data } = await client.post<{ data: { projectId: string } }>("/importStory", { directory, title, sourceKind, sourceText });
     return data.data.projectId;
+  },
+  async listEpisodes(directory: string, projectId: string) {
+    const { data } = await client.get<{ data: { episodes: Episode[] } }>("/listEpisodes", { params: { directory, projectId } });
+    return data.data.episodes;
+  },
+  async createEpisode(directory: string, projectId: string, episodeNumber: number, title: string, logline: string) {
+    const { data } = await client.post<{ data: { episode: Episode } }>("/createEpisode",
+      { directory, projectId, episodeNumber, title, logline });
+    return data.data.episode;
+  },
+  async getEpisodeCost(directory: string, projectId: string, episodeId: string) {
+    const { data } = await client.get<{ data: EpisodeCost }>("/getEpisodeCost",
+      { params: { directory, projectId, episodeId } });
+    return data.data;
   },
   async listPriceRules(directory: string) {
     const { data } = await client.get<{ data: { rules: PriceRule[] } }>("/listPriceRules", { params: { directory } });

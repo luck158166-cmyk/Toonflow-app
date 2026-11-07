@@ -41,6 +41,9 @@
       </section>
     </div>
       </el-tab-pane>
+      <el-tab-pane label="分集与费用" name="episodes">
+        <episodeCenter :directory="props.directory" :stories="stories" />
+      </el-tab-pane>
       <el-tab-pane label="价格规则" name="prices">
         <div class="priceCenter">
           <p>价格由你按供应商资料录入；保存规则不会发起模型请求。</p>
@@ -112,6 +115,7 @@ import axios from "axios";
 import { ElMessage } from "element-plus";
 import { computed, ref, watch } from "vue";
 import productionApi, { type BudgetOverview, type PriceRule, type SourceKind, type Story, type StoryDetail } from "@/lib/productionApi";
+import episodeCenter from "./episodeCenter.vue";
 
 const props = defineProps<{ directory: string }>();
 const visible = defineModel<boolean>({ required: true });

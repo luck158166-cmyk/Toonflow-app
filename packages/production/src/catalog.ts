@@ -195,6 +195,24 @@ export class ProductionCatalog {
     return id;
   }
 
+  listEpisodes(projectId: string) {
+    return this.db.query(`SELECT e.id, e.project_id AS projectId, e.episode_number AS episodeNumber,
+      e.title, e.logline, e.review_state AS reviewState, e.created_at AS createdAt,
+      e.updated_at AS updatedAt, COUNT(s.id) AS shotCount
+      FROM production_episode e LEFT JOIN production_shot s ON s.episode_id = e.id
+      WHERE e.project_id = ? GROUP BY e.id ORDER BY e.episode_number`)
+      .all(projectId) as Array<{ id: string; projectId: string; episodeNumber: number; title: string;
+        logline: string; reviewState: ReviewState; createdAt: number; updatedAt: number; shotCount: number }>;
+  }
+
+  getEpisode(episodeId: string) {
+    return this.db.query(`SELECT id, project_id AS projectId, episode_number AS episodeNumber,
+      title, logline, review_state AS reviewState, created_at AS createdAt, updated_at AS updatedAt
+      FROM production_episode WHERE id = ?`).get(episodeId) as
+      | { id: string; projectId: string; episodeNumber: number; title: string; logline: string;
+        reviewState: ReviewState; createdAt: number; updatedAt: number } | null;
+  }
+
   saveEpisodeScript(episodeId: string, script: unknown[], reviewState: ReviewState = "draft") {
     if (!Array.isArray(script) || script.length === 0) throw new TypeError("Episode script must contain structured scenes.");
     this.db.query(`UPDATE production_episode SET script_json = ?, review_state = ?, updated_at = ? WHERE id = ?`)

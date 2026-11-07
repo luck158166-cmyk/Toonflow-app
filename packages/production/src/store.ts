@@ -586,6 +586,20 @@ export class ProductionStore {
       }>;
   }
 
+  listEpisodeCharges(projectId: string, episodeId: string) {
+    if (!projectId.trim() || !episodeId.trim()) throw new TypeError("Project and episode IDs are required.");
+    return this.db.query(`SELECT c.task_id AS taskId, t.shot_id AS shotId, t.stage,
+      t.provider, t.model_id AS modelId, c.source_ref AS sourceRef,
+      c.amount_micros AS amountMicros, c.currency, c.status, c.pricing_ref AS pricingRef,
+      c.unit, c.units, c.unit_price_micros AS unitPriceMicros, c.created_at AS createdAt
+      FROM cost_ledger c JOIN generation_task t ON t.id = c.task_id
+      WHERE t.project_id = ? AND t.episode_id = ? ORDER BY c.created_at, c.id`)
+      .all(projectId, episodeId) as Array<{ taskId: string; shotId: string | null; stage: TaskStage;
+        provider: string; modelId: string; sourceRef: string; amountMicros: number; currency: string;
+        status: "reconciled" | "manual"; pricingRef: string | null; unit: string | null;
+        units: number | null; unitPriceMicros: number | null; createdAt: number }>;
+  }
+
   enqueueMediaDownload(taskId: string, slot: string, remoteUrl: string, destinationPath: string,
     expiresAt: number, now = Date.now()) {
     if (!slot.trim() || !destinationPath.trim()) throw new TypeError("Download slot and destination path are required.");

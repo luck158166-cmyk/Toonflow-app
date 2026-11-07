@@ -32,6 +32,29 @@ function fixture() {
 }
 
 describe("production task safety", () => {
+  it("separates episode charges from active reservations and other episodes", () => {
+    const { db, store } = fixture();
+    try {
+      const settled = store.createTask(paidInput("episode-cost-settled", 200)).task;
+      store.beginSubmission(settled.id);
+      store.settleReservation(settled.id, "provider-cost-1", 140, "CNY");
+      const pending = store.createTask(paidInput("episode-cost-pending", 300)).task;
+      store.beginSubmission(pending.id);
+      const other = store.createTask({ ...paidInput("episode-cost-other", 500), episodeId: "episode-2" }).task;
+      store.beginSubmission(other.id);
+      store.settleReservation(other.id, "provider-cost-2", 400, "CNY");
+      const breakdown = store.getEpisodeCostBreakdown("project-1", "episode-1");
+      expect(breakdown.reduce((sum, item) => sum + item.chargedMicros, 0)).toBe(140);
+      expect(breakdown.reduce((sum, item) => sum + item.reservedMicros, 0)).toBe(300);
+      expect(store.listEpisodeCharges("project-1", "episode-1")).toMatchObject([
+        { taskId: settled.id, sourceRef: "provider-cost-1", amountMicros: 140, currency: "CNY" },
+      ]);
+      expect(store.listEpisodeCharges("project-1", "episode-2")[0]?.taskId).toBe(other.id);
+      expect(store.getEpisodeCostBreakdown("project-2", "episode-1")).toEqual([]);
+      expect(pending.id).not.toBe(settled.id);
+    } finally { db.close(); }
+  });
+
   it("never resets a paid generation task through the local synthesis retry path", () => {
     const { db, store } = fixture();
     try {

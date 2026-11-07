@@ -4,6 +4,22 @@ import { applyEpisodeDraft, ProductionCatalog, type EpisodeDraft } from "../pack
 import { ProductionStore } from "../packages/production/src/store";
 
 describe("structured production catalog", () => {
+  it("lists episodes only within their story and preserves episode order", () => {
+    const db = new Database(":memory:");
+    try {
+      const catalog = new ProductionCatalog(db);
+      const first = catalog.importStory({ title: "甲", sourceKind: "synopsis", sourceText: "甲故事" });
+      const second = catalog.importStory({ title: "乙", sourceKind: "synopsis", sourceText: "乙故事" });
+      const later = catalog.createEpisode(first, 2, "第二集", "后续");
+      const earlier = catalog.createEpisode(first, 1, "第一集");
+      catalog.createEpisode(second, 1, "乙第一集");
+      expect(catalog.listEpisodes(first).map(episode => episode.id)).toEqual([earlier, later]);
+      expect(catalog.listEpisodes(first)[0]?.shotCount).toBe(0);
+      expect(catalog.getEpisode(later)).toMatchObject({ projectId: first, episodeNumber: 2, logline: "后续" });
+      expect(catalog.getEpisode("missing")).toBeNull();
+    } finally { db.close(); }
+  });
+
   it("lists story metadata without leaking source text and reads only the selected story", () => {
     const db = new Database(":memory:");
     const catalog = new ProductionCatalog(db);
