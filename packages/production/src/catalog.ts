@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Database } from "bun:sqlite";
+import { checkEpisodeScript, indexNovel } from "./novelAdaptation";
 
 export type SourceKind = "synopsis" | "novel" | "script";
 export type ReviewState = "draft" | "confirmed" | "changes_requested";
@@ -215,6 +216,8 @@ export class ProductionCatalog {
 
   getProjectProduction(projectId: string) {
     if (!projectId.trim()) throw new TypeError("Project ID is required.");
+    const story = this.getStory(projectId);
+    const chapterIndex = story?.sourceKind === "novel" ? indexNovel(story.sourceText) : null;
     const analysisRow = this.db.query(`SELECT events_json AS eventsJson, relations_json AS relationsJson,
       version, updated_at AS updatedAt FROM story_analysis WHERE project_id = ?`).get(projectId) as
       | { eventsJson: string; relationsJson: string; version: number; updatedAt: number } | null;
@@ -251,11 +254,15 @@ export class ProductionCatalog {
         promptVersion: number; reviewState: ReviewState; runtimeState: RuntimeState;
         videoReadiness: VideoReadiness }>;
     return {
+      chapterIndex,
       analysis: analysisRow ? { events: JSON.parse(analysisRow.eventsJson) as unknown[],
         relations: JSON.parse(analysisRow.relationsJson) as unknown[],
         version: analysisRow.version, updatedAt: analysisRow.updatedAt } : null,
-      episodes: episodes.map(({ outlineJson, scriptJson, ...episode }) => ({ ...episode,
-        outline: JSON.parse(outlineJson) as string[], script: JSON.parse(scriptJson) as unknown[] })),
+      episodes: episodes.map(({ outlineJson, scriptJson, ...episode }) => {
+        const script = JSON.parse(scriptJson) as unknown[];
+        return { ...episode, outline: JSON.parse(outlineJson) as string[], script,
+          scriptReport: checkEpisodeScript(script, chapterIndex?.chapters ?? [], undefined, !!chapterIndex) };
+      }),
       assets: assets.map(({ aliasesJson, evidenceJson, locked, ...asset }) => ({ ...asset,
         aliases: JSON.parse(aliasesJson) as string[], evidence: JSON.parse(evidenceJson) as unknown[], locked: !!locked })),
       scenes: scenes.map(({ evidenceJson, locked, ...scene }) => ({ ...scene,

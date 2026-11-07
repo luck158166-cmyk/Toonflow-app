@@ -31,13 +31,14 @@
               <el-button v-if="project" text @click="selectedStoryId = ''">导入另一个故事</el-button>
             </section>
           </div>
+          <section v-if="project?.chapterIndex" class="surfaceCard"><div class="cardHeading"><h3>小说章节索引</h3><small>原文 SHA-256：{{ project.chapterIndex.sourceHash.slice(0, 12) }}…</small></div><p class="subtleText">{{ project.chapterIndex.chapters.length }} 章 · {{ project.chapterIndex.lineCount }} 行。每章保留原文行号，后续事件和剧本须据此引用。</p><p v-for="(issue, index) in project.chapterIndex.issues" :key="index" class="sourceIssue">{{ issue }}</p><el-table :data="project.chapterIndex.chapters" maxHeight="340" emptyText="请确认小说分章边界"><el-table-column prop="sequence" label="序号" width="72" /><el-table-column prop="title" label="章节" minWidth="220" /><el-table-column label="原文行号" width="150"><template #default="{ row }">{{ row.lineStart }}–{{ row.lineEnd }}</template></el-table-column><el-table-column prop="characterCount" label="正文字数" width="110" /></el-table></section>
           <section v-if="project?.analysis" class="surfaceCard"><div class="cardHeading"><h3>故事分析 · 第 {{ project.analysis.version }} 版</h3><small>{{ new Date(project.analysis.updatedAt).toLocaleString() }}</small></div><div class="twoColumns"><div><h4>事件</h4><pre v-for="(event, index) in project.analysis.events" :key="index" class="structuredItem">{{ JSON.stringify(event, null, 2) }}</pre><p v-if="!project.analysis.events.length" class="subtleText">暂无事件</p></div><div><h4>人物关系</h4><pre v-for="(relation, index) in project.analysis.relations" :key="index" class="structuredItem">{{ JSON.stringify(relation, null, 2) }}</pre><p v-if="!project.analysis.relations.length" class="subtleText">暂无关系</p></div></div></section>
         </template>
 
         <template v-else-if="activeStage === 'episodes'">
           <div class="sectionHeading"><div><h2>分集剧本</h2><p>每集的梗概、提纲和剧本与故事资料关联。</p></div></div>
           <section class="surfaceCard"><episodeCenter :directory="directory" :stories="stories" :selectedProjectId="selectedStoryId" @changed="refreshProject" /></section>
-          <section v-if="project?.episodes.length" class="surfaceCard"><h3>已保存的提纲与剧本</h3><div v-for="episode in project.episodes" :key="episode.id" class="episodeDetail"><div class="cardHeading"><strong>第 {{ episode.episodeNumber }} 集 · {{ episode.title }}</strong><el-tag size="small">{{ episode.reviewState }}</el-tag></div><p>{{ episode.logline || '尚无本集梗概' }}</p><ol v-if="episode.outline.length"><li v-for="(beat, index) in episode.outline" :key="index">{{ beat }}</li></ol><p v-else class="subtleText">尚无结构化提纲</p><small>剧本场次：{{ episode.script.length }}</small></div></section>
+          <section v-if="project?.episodes.length" class="surfaceCard"><h3>已保存的提纲与剧本</h3><div v-for="episode in project.episodes" :key="episode.id" class="episodeDetail"><div class="cardHeading"><strong>第 {{ episode.episodeNumber }} 集 · {{ episode.title }}</strong><el-tag size="small" :type="episode.scriptReport.passed ? 'success' : 'warning'">{{ episode.scriptReport.passed ? '基础校验通过' : `${episode.scriptReport.checks.length} 项待修正` }}</el-tag></div><p>{{ episode.logline || '尚无本集梗概' }}</p><ol v-if="episode.outline.length"><li v-for="(beat, index) in episode.outline" :key="index">{{ beat }}</li></ol><p v-else class="subtleText">尚无结构化提纲</p><small>剧本场次：{{ episode.script.length }} · 预估时长 {{ episode.scriptReport.estimatedSeconds }} 秒</small><ul v-if="episode.scriptReport.checks.length" class="scriptIssues"><li v-for="(check, index) in episode.scriptReport.checks" :key="index">{{ check.scene ? `第 ${check.scene} 场：` : '' }}{{ check.message }}</li></ul></div></section>
         </template>
 
         <template v-else-if="activeStage === 'assets'">
@@ -275,6 +276,8 @@ async function exportBackup() {
 .storyRow { display: grid; gap: 4px; width: 100%; margin: 6px 0; padding: 12px; border: 1px solid var(--el-border-color-light); border-radius: 8px; background: transparent; color: inherit; text-align: left; cursor: pointer; &.selected { border-color: var(--el-color-primary); background: var(--el-color-primary-light-9); } span { color: var(--el-text-color-secondary); font-size: 11px; } }
 .cardHeading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .subtleText { color: var(--el-text-color-secondary); font-size: 12px; }
+.sourceIssue, .scriptIssues { color: #e4bb8a; font-size: 12px; }
+.scriptIssues { padding-left: 20px; line-height: 1.7; }
 .formActions { display: flex; justify-content: flex-end; gap: 8px; }
 .hiddenInput { display: none; }
 .episodeDetail { padding: 14px 0; border-top: 1px solid var(--el-border-color-light); &:first-of-type { border-top: 0; } ol { padding-left: 20px; } small { color: var(--el-text-color-secondary); } }

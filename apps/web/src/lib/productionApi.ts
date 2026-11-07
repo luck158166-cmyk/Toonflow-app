@@ -12,8 +12,14 @@ export type EpisodeCost = { episode: Episode; breakdown: Array<{ shotId: string 
     pricingRef: string | null; unit: string | null; units: number | null; unitPriceMicros: number | null;
     createdAt: number }> };
 export type ProjectProduction = { story: StoryDetail;
+  chapterIndex: { sourceHash: string; lineCount: number; chapterUnit: "章" | "回" | "节" | null;
+    chapters: Array<{ sequence: number; title: string; lineStart: number; lineEnd: number;
+      contentLineStart: number; characterCount: number }>;
+    issues: string[] } | null;
   analysis: { events: unknown[]; relations: unknown[]; version: number; updatedAt: number } | null;
-  episodes: Array<Episode & { outline: string[]; script: unknown[] }>;
+  episodes: Array<Episode & { outline: string[]; script: unknown[];
+    scriptReport: { passed: boolean; estimatedSeconds: number;
+      checks: Array<{ code: string; scene: number | null; message: string }> } }>;
   assets: Array<{ id: string; kind: "character" | "prop" | "costume"; name: string;
     aliases: string[]; stableDescription: string; evidence: unknown[]; firstAppearance: string;
     variantOf: string | null; locked: boolean }>;

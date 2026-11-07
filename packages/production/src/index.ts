@@ -1,4 +1,5 @@
 export * from "./catalog";
+export * from "./novelAdaptation";
 export * from "./store";
 export * from "./globalBudgetCoordinator";
 export * from "./dispatcher";
